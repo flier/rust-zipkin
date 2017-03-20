@@ -1,4 +1,5 @@
 extern crate rand;
+extern crate xoroshiro128;
 extern crate chrono;
 extern crate futures;
 

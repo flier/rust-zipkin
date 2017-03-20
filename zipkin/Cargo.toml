@@ -6,4 +6,5 @@ authors = ["Flier Lu <flier.lu@gmail.com>"]
 [dependencies]
 chrono = "0.3"
 rand = "0.3"
+xoroshiro128 = "0.2"
 futures = "0.1"

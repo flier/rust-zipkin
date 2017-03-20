@@ -145,7 +145,7 @@ impl<'a> Serialize for zipkin::Span<'a> {
                     .into()
             },
             debug: self.debug,
-            timestamp: self.timestamp.map(|ts| ts.serialize()),
+            timestamp: Some(self.timestamp.serialize()),
             duration: self.duration.map(|d| d.serialize()),
         }
     }

@@ -131,9 +131,7 @@ impl<'a> Serialize for zipkin::Span<'a> {
         if let Some(id) = self.parent_id {
             attrs["parentId"] = id.serialize();
         }
-        if let Some(ts) = self.timestamp {
-            attrs["timestamp"] = ts.serialize();
-        }
+        attrs["timestamp"] = self.timestamp.serialize();
         if let Some(d) = self.duration {
             attrs["duration"] = d.serialize();
         }
