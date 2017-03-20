@@ -1,0 +1,8 @@
+[package]
+name = "zipkin-json"
+version = "0.1.0"
+authors = ["Flier Lu <flier.lu@gmail.com>"]
+
+[dependencies]
+serde_json = "0.9"
+zipkin = { path="../zipkin" }

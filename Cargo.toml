@@ -1,0 +1,3 @@
+[workspace]
+
+members = ["zipkin", "zipkin-json", "zipkin-thrift", "zipkin-http", "zipkin-kafka"]

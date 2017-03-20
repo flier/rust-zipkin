@@ -1,0 +1,9 @@
+[package]
+name = "zipkin"
+version = "0.1.0"
+authors = ["Flier Lu <flier.lu@gmail.com>"]
+
+[dependencies]
+chrono = "0.3"
+rand = "0.3"
+futures = "0.1"

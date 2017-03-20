@@ -1,0 +1,4 @@
+[submodule "zipkin-thrift/thrift"]
+	path = zipkin-thrift/thrift
+	url = https://github.com/flier/thrift.git
+	branch = export-mem-transport
