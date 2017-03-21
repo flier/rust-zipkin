@@ -15,32 +15,32 @@ use zipkin;
 use core;
 use errors::Result;
 
-trait Serialize {
+trait ToThrift {
     type Output;
 
-    fn serialize(&self) -> Self::Output;
+    fn to_thrift(&self) -> Self::Output;
 }
 
-impl Serialize for zipkin::Timestamp {
+impl ToThrift for zipkin::Timestamp {
     type Output = i64;
 
-    fn serialize(&self) -> Self::Output {
+    fn to_thrift(&self) -> Self::Output {
         self.timestamp() * 1000_000 + self.timestamp_subsec_micros() as i64
     }
 }
 
-impl Serialize for zipkin::Duration {
+impl ToThrift for zipkin::Duration {
     type Output = i64;
 
-    fn serialize(&self) -> Self::Output {
+    fn to_thrift(&self) -> Self::Output {
         self.num_microseconds().unwrap_or(i64::max_value()).into()
     }
 }
 
-impl<'a> Serialize for zipkin::Endpoint<'a> {
+impl<'a> ToThrift for zipkin::Endpoint<'a> {
     type Output = core::Endpoint;
 
-    fn serialize(&self) -> Self::Output {
+    fn to_thrift(&self) -> Self::Output {
         core::Endpoint {
             service_name: self.name.map(|name| name.into()),
             ipv4: if let Some(SocketAddr::V4(addr)) = self.addr {
@@ -62,22 +62,22 @@ impl<'a> Serialize for zipkin::Endpoint<'a> {
     }
 }
 
-impl<'a> Serialize for zipkin::Annotation<'a> {
+impl<'a> ToThrift for zipkin::Annotation<'a> {
     type Output = core::Annotation;
 
-    fn serialize(&self) -> Self::Output {
+    fn to_thrift(&self) -> Self::Output {
         core::Annotation {
-            timestamp: Some(self.timestamp.serialize()),
+            timestamp: Some(self.timestamp.to_thrift()),
             value: Some(self.value.into()),
-            host: self.endpoint.clone().map(|ref endpoint| endpoint.serialize()),
+            host: self.endpoint.clone().map(|ref endpoint| endpoint.to_thrift()),
         }
     }
 }
 
-impl<'a> Serialize for zipkin::BinaryAnnotation<'a> {
+impl<'a> ToThrift for zipkin::BinaryAnnotation<'a> {
     type Output = core::BinaryAnnotation;
 
-    fn serialize(&self) -> Self::Output {
+    fn to_thrift(&self) -> Self::Output {
         let mut buf = vec![];
         let (value, ty) = match self.value {
             zipkin::Value::Bool(v) => (vec![if v { 1 } else { 0 }], core::AnnotationType::BOOL),
@@ -111,15 +111,15 @@ impl<'a> Serialize for zipkin::BinaryAnnotation<'a> {
             key: Some(self.key.into()),
             value: Some(value),
             annotation_type: Some(ty),
-            host: self.endpoint.clone().map(|ref endpoint| endpoint.serialize()),
+            host: self.endpoint.clone().map(|ref endpoint| endpoint.to_thrift()),
         }
     }
 }
 
-impl<'a> Serialize for zipkin::Span<'a> {
+impl<'a> ToThrift for zipkin::Span<'a> {
     type Output = core::Span;
 
-    fn serialize(&self) -> Self::Output {
+    fn to_thrift(&self) -> Self::Output {
         core::Span {
             trace_id: Some(self.trace_id.lo as i64),
             trace_id_high: self.trace_id.hi.map(|id| id as i64),
@@ -131,7 +131,7 @@ impl<'a> Serialize for zipkin::Span<'a> {
             } else {
                 self.annotations
                     .iter()
-                    .map(|annotation| annotation.serialize())
+                    .map(|annotation| annotation.to_thrift())
                     .collect::<Vec<core::Annotation>>()
                     .into()
             },
@@ -140,19 +140,19 @@ impl<'a> Serialize for zipkin::Span<'a> {
             } else {
                 self.binary_annotations
                     .iter()
-                    .map(|annotation| annotation.serialize())
+                    .map(|annotation| annotation.to_thrift())
                     .collect::<Vec<core::BinaryAnnotation>>()
                     .into()
             },
             debug: self.debug,
-            timestamp: Some(self.timestamp.serialize()),
-            duration: self.duration.map(|d| d.serialize()),
+            timestamp: Some(self.timestamp.to_thrift()),
+            duration: self.duration.map(|d| d.to_thrift()),
         }
     }
 }
 
 pub fn to_thrift(span: &zipkin::Span) -> core::Span {
-    span.serialize()
+    span.to_thrift()
 }
 
 pub fn to_vec(span: &zipkin::Span) -> Result<Vec<u8>> {
