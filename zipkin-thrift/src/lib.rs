@@ -6,6 +6,9 @@ extern crate thrift;
 extern crate try_from;
 extern crate zipkin;
 
+#[cfg(test)]
+extern crate chrono;
+
 mod core;
 mod errors;
 mod encode;
