@@ -7,7 +7,8 @@ authors = ["Flier Lu <flier.lu@gmail.com>"]
 serde_json = "0.9"
 base64 = "0.4"
 
-zipkin = { path="../zipkin" }
+[dependencies.zipkin]
+path = "../zipkin"
 
 [dev-dependencies]
 chrono = "0.3"
