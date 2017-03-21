@@ -46,7 +46,7 @@ impl<'a> Serialize for zipkin::Endpoint<'a> {
     fn serialize(&self) -> Value {
         let mut attrs = Map::new();
 
-        if let Some(name) = self.service_name {
+        if let Some(name) = self.name {
             attrs["serviceName"] = name.into();
         }
 
@@ -85,7 +85,7 @@ impl<'a> Serialize for zipkin::Annotation<'a> {
 
         attrs["timestamp"] = self.timestamp.serialize();
         attrs["value"] = self.value.into();
-        if let Some(endpoint) = self.endpoint {
+        if let Some(ref endpoint) = self.endpoint {
             attrs["endpoint"] = endpoint.serialize()
         }
 
@@ -113,7 +113,7 @@ impl<'a> Serialize for zipkin::BinaryAnnotation<'a> {
         if let Some(ty) = ty {
             attrs["type"] = ty.into()
         }
-        if let Some(endpoint) = self.endpoint {
+        if let Some(ref endpoint) = self.endpoint {
             attrs["endpoint"] = endpoint.serialize()
         }
 

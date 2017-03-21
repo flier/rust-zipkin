@@ -63,7 +63,7 @@ pub type Duration = chrono::Duration;
 #[derive(Clone, Debug)]
 pub struct Endpoint<'a> {
     /// Classifier of a source or destination in lowercase, such as "zipkin-server".
-    pub service_name: Option<&'a str>,
+    pub name: Option<&'a str>,
     /// Endpoint address packed in the network endian
     pub addr: Option<SocketAddr>,
 }
@@ -76,21 +76,16 @@ pub struct Annotation<'a> {
     /// Usually a short tag indicating an event
     pub value: &'a str,
     /// The host that recorded, primarily for query by service name.
-    pub endpoint: Option<&'a Endpoint<'a>>,
+    pub endpoint: Option<Rc<Endpoint<'a>>>,
 }
 
 impl<'a> Annotation<'a> {
-    fn new(value: &'a str) -> Annotation<'a> {
+    fn new(value: &'a str, endpoint: Option<Rc<Endpoint<'a>>>) -> Annotation<'a> {
         Annotation {
             value: value,
             timestamp: UTC::now(),
-            endpoint: None,
+            endpoint: endpoint,
         }
-    }
-
-    pub fn with_endpoint(&mut self, endpoint: &'a Endpoint) -> &mut Self {
-        self.endpoint = Some(endpoint);
-        self
     }
 }
 
@@ -272,23 +267,21 @@ pub struct BinaryAnnotation<'a> {
     /// Value of annotation
     pub value: Value<'a>,
     /// The host that recorded, primarily for query by service name.
-    pub endpoint: Option<&'a Endpoint<'a>>,
+    pub endpoint: Option<Rc<Endpoint<'a>>>,
 }
 
 impl<'a> BinaryAnnotation<'a> {
-    pub fn new<V>(key: &'a str, value: V) -> BinaryAnnotation<'a>
+    pub fn new<V>(key: &'a str,
+                  value: V,
+                  endpoint: Option<Rc<Endpoint<'a>>>)
+                  -> BinaryAnnotation<'a>
         where V: Sized + BinaryAnnotationValue<'a>
     {
         BinaryAnnotation {
             key: key,
             value: value.to_value(),
-            endpoint: None,
+            endpoint: endpoint,
         }
-    }
-
-    pub fn with_endpoint(&mut self, endpoint: &'a Endpoint) -> &mut Self {
-        self.endpoint = Some(endpoint);
-        self
     }
 }
 
@@ -309,9 +302,9 @@ pub struct Span<'a> {
     /// Durations of less than one microsecond must be rounded up to 1 microsecond.
     pub duration: Option<Duration>,
     /// Associates events that explain latency with a timestamp.
-    pub annotations: Vec<Rc<Annotation<'a>>>,
+    pub annotations: Vec<Annotation<'a>>,
     /// Tags a span with context, usually to support query or aggregation.
-    pub binary_annotations: Vec<Rc<BinaryAnnotation<'a>>>,
+    pub binary_annotations: Vec<BinaryAnnotation<'a>>,
     /// A request to store this span even if it overrides sampling policy.
     pub debug: Option<bool>,
 }
@@ -343,32 +336,29 @@ impl<'a> Span<'a> {
         Span { debug: Some(debug), ..self }
     }
 
-    pub fn annotate(&mut self, value: &'a str) -> Rc<Annotation<'a>> {
-        let annotation = Rc::new(Annotation::new(value));
-
-        self.annotations.push(annotation.clone());
-
-        annotation
+    pub fn annotate(&mut self, value: &'a str, endpoint: Option<Rc<Endpoint<'a>>>) {
+        self.annotations.push(Annotation::new(value, endpoint))
     }
 
-    pub fn binary_annotate<V>(&mut self, key: &'a str, value: V) -> Rc<BinaryAnnotation<'a>>
+    pub fn binary_annotate<V>(&mut self,
+                              key: &'a str,
+                              value: V,
+                              endpoint: Option<Rc<Endpoint<'a>>>)
         where V: Sized + BinaryAnnotationValue<'a>
     {
-        let annotation = Rc::new(BinaryAnnotation::new(key, value));
-
-        self.binary_annotations.push(annotation.clone());
-
-        annotation
+        self.binary_annotations.push(BinaryAnnotation::new(key, value, endpoint))
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::rc::Rc;
+
     use super::*;
     use super::super::*;
 
     #[test]
-    fn test_gen_id() {
+    fn gen_id() {
         assert!(next_id() != 0);
         assert!(next_id() != next_id());
 
@@ -380,7 +370,7 @@ mod tests {
     }
 
     #[test]
-    fn test_span() {
+    fn span() {
         let span = Span::new("test");
 
         assert!(span.trace_id.lo != 0);
@@ -403,89 +393,123 @@ mod tests {
     }
 
     #[test]
-    fn test_annonation() {
+    fn annonation() {
         let mut span = Span::new("test");
+        let endpoint = Some(Rc::new(Endpoint {
+            name: Some("test"),
+            addr: None,
+        }));
 
-        let annonation = span.annotate(CLIENT_SEND);
+        span.annotate(CLIENT_SEND, endpoint.clone());
+        {
+            let annonation = span.annotations.last().unwrap();
 
-        assert_eq!(span.annotations.len(), 1);
-        assert_eq!(annonation.value, CLIENT_SEND);
-        assert!(annonation.timestamp.timestamp() != 0);
+            assert_eq!(span.annotations.len(), 1);
+            assert_eq!(annonation.value, CLIENT_SEND);
+            assert!(annonation.timestamp.timestamp() != 0);
+            assert!(annonation.endpoint.is_some());
+            assert_eq!(annonation.endpoint.as_ref().unwrap().name, Some("test"));
+        }
+        span.annotate(CLIENT_RECV, None);
+        {
+            let annonation = span.annotations.last().unwrap();
 
-        let annonation = span.annotate(CLIENT_RECV);
+            assert_eq!(span.annotations.len(), 2);
+            assert_eq!(annonation.value, CLIENT_RECV);
+            assert!(annonation.timestamp.timestamp() != 0);
+            assert!(annonation.endpoint.is_none());
+        }
+        span.binary_annotate(HTTP_METHOD, "GET", endpoint.clone());
+        {
+            let annonation = span.binary_annotations.last().unwrap();
 
-        assert_eq!(span.annotations.len(), 2);
-        assert_eq!(annonation.value, CLIENT_RECV);
-        assert!(annonation.timestamp.timestamp() != 0);
+            assert_eq!(span.binary_annotations.len(), 1);
+            assert_eq!(annonation.key, HTTP_METHOD);
+            assert_eq!(annonation.value, Value::String("GET"));
+        }
+        span.binary_annotate("debug", true, None);
+        {
+            let annonation = span.binary_annotations.last().unwrap();
 
-        let annonation = span.binary_annotate(HTTP_METHOD, "GET");
+            assert_eq!(span.binary_annotations.len(), 2);
+            assert_eq!(annonation.key, "debug");
+            assert_eq!(annonation.value, Value::Bool(true));
+        }
+        span.binary_annotate(HTTP_STATUS_CODE, 123i16, None);
+        {
+            let annonation = span.binary_annotations.last().unwrap();
 
-        assert_eq!(span.binary_annotations.len(), 1);
-        assert_eq!(annonation.key, HTTP_METHOD);
-        assert_eq!(annonation.value, Value::String("GET"));
+            assert_eq!(span.binary_annotations.len(), 3);
+            assert_eq!(annonation.key, HTTP_STATUS_CODE);
+            assert_eq!(annonation.value, Value::I16(123));
+        }
+        span.binary_annotate(HTTP_REQUEST_SIZE, -456i32, None);
+        {
+            let annonation = span.binary_annotations.last().unwrap();
 
-        let annonation = span.binary_annotate("debug", true);
+            assert_eq!(span.binary_annotations.len(), 4);
+            assert_eq!(annonation.key, HTTP_REQUEST_SIZE);
+            assert_eq!(annonation.value, Value::I32(-456));
+        }
+        span.binary_annotate(HTTP_RESPONSE_SIZE, -789i64, None);
+        {
+            let annonation = span.binary_annotations.last().unwrap();
 
-        assert_eq!(span.binary_annotations.len(), 2);
-        assert_eq!(annonation.key, "debug");
-        assert_eq!(annonation.value, Value::Bool(true));
+            assert_eq!(span.binary_annotations.len(), 5);
+            assert_eq!(annonation.key, HTTP_RESPONSE_SIZE);
+            assert_eq!(annonation.value, Value::I64(-789));
 
-        let annonation = span.binary_annotate(HTTP_STATUS_CODE, 123i16);
+        }
+        span.binary_annotate("time", 123.456, None);
+        {
+            let annonation = span.binary_annotations.last().unwrap();
 
-        assert_eq!(span.binary_annotations.len(), 3);
-        assert_eq!(annonation.key, HTTP_STATUS_CODE);
-        assert_eq!(annonation.value, Value::I16(123));
+            assert_eq!(span.binary_annotations.len(), 6);
+            assert_eq!(annonation.key, "time");
+            assert_eq!(annonation.value, Value::Double(123.456));
+        }
+        span.binary_annotate(ERROR, "some error", None);
+        {
+            let annonation = span.binary_annotations.last().unwrap();
 
-        let annonation = span.binary_annotate(HTTP_REQUEST_SIZE, -456i32);
+            assert_eq!(span.binary_annotations.len(), 7);
+            assert_eq!(annonation.key, ERROR);
+            assert_eq!(annonation.value, Value::String("some error"));
+        }
+        span.binary_annotate("raw", &b"some\0raw\0data"[..], None);
+        {
+            let annonation = span.binary_annotations.last().unwrap();
 
-        assert_eq!(span.binary_annotations.len(), 4);
-        assert_eq!(annonation.key, HTTP_REQUEST_SIZE);
-        assert_eq!(annonation.value, Value::I32(-456));
+            assert_eq!(span.binary_annotations.len(), 8);
+            assert_eq!(annonation.key, "raw");
+            assert_eq!(annonation.value, Value::Bytes(&b"some\0raw\0data"[..]));
+        }
+        span.binary_annotate(HTTP_STATUS_CODE, i16::max_value() as u16 + 1, None);
+        {
+            let annonation = span.binary_annotations.last().unwrap();
 
-        let annonation = span.binary_annotate(HTTP_RESPONSE_SIZE, -789i64);
+            assert_eq!(span.binary_annotations.len(), 9);
+            assert_eq!(annonation.key, HTTP_STATUS_CODE);
+            assert_eq!(annonation.value, Value::I16(-32768));
+            assert_eq!(annonation.value.as_u16(), Some(0x8000));
+        }
+        span.binary_annotate(HTTP_REQUEST_SIZE, i32::max_value() as u32 + 1, None);
+        {
+            let annonation = span.binary_annotations.last().unwrap();
 
-        assert_eq!(span.binary_annotations.len(), 5);
-        assert_eq!(annonation.key, HTTP_RESPONSE_SIZE);
-        assert_eq!(annonation.value, Value::I64(-789));
+            assert_eq!(span.binary_annotations.len(), 10);
+            assert_eq!(annonation.key, HTTP_REQUEST_SIZE);
+            assert_eq!(annonation.value, Value::I32(-2147483648));
+            assert_eq!(annonation.value.as_u32(), Some(0x80000000));
+        }
+        span.binary_annotate(HTTP_RESPONSE_SIZE, i64::max_value() as u64 + 1, None);
+        {
+            let annonation = span.binary_annotations.last().unwrap();
 
-        let annonation = span.binary_annotate("time", 123.456);
-
-        assert_eq!(span.binary_annotations.len(), 6);
-        assert_eq!(annonation.key, "time");
-        assert_eq!(annonation.value, Value::Double(123.456));
-
-        let annonation = span.binary_annotate(ERROR, "some error");
-
-        assert_eq!(span.binary_annotations.len(), 7);
-        assert_eq!(annonation.key, ERROR);
-        assert_eq!(annonation.value, Value::String("some error"));
-
-        let annonation = span.binary_annotate("raw", &b"some\0raw\0data"[..]);
-
-        assert_eq!(span.binary_annotations.len(), 8);
-        assert_eq!(annonation.key, "raw");
-        assert_eq!(annonation.value, Value::Bytes(&b"some\0raw\0data"[..]));
-
-        let annonation = span.binary_annotate(HTTP_STATUS_CODE, i16::max_value() as u16 + 1);
-
-        assert_eq!(span.binary_annotations.len(), 9);
-        assert_eq!(annonation.key, HTTP_STATUS_CODE);
-        assert_eq!(annonation.value, Value::I16(-32768));
-        assert_eq!(annonation.value.as_u16(), Some(0x8000));
-
-        let annonation = span.binary_annotate(HTTP_REQUEST_SIZE, i32::max_value() as u32 + 1);
-
-        assert_eq!(span.binary_annotations.len(), 10);
-        assert_eq!(annonation.key, HTTP_REQUEST_SIZE);
-        assert_eq!(annonation.value, Value::I32(-2147483648));
-        assert_eq!(annonation.value.as_u32(), Some(0x80000000));
-
-        let annonation = span.binary_annotate(HTTP_RESPONSE_SIZE, i64::max_value() as u64 + 1);
-
-        assert_eq!(span.binary_annotations.len(), 11);
-        assert_eq!(annonation.key, HTTP_RESPONSE_SIZE);
-        assert_eq!(annonation.value, Value::I64(-9223372036854775808));
-        assert_eq!(annonation.value.as_u64(), Some(0x8000000000000000));
-
+            assert_eq!(span.binary_annotations.len(), 11);
+            assert_eq!(annonation.key, HTTP_RESPONSE_SIZE);
+            assert_eq!(annonation.value, Value::I64(-9223372036854775808));
+            assert_eq!(annonation.value.as_u64(), Some(0x8000000000000000));
+        }
     }
 }

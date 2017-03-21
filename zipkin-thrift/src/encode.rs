@@ -42,7 +42,7 @@ impl<'a> Serialize for zipkin::Endpoint<'a> {
 
     fn serialize(&self) -> Self::Output {
         core::Endpoint {
-            service_name: self.service_name.map(|name| name.into()),
+            service_name: self.name.map(|name| name.into()),
             ipv4: if let Some(SocketAddr::V4(addr)) = self.addr {
                 let ip = &addr.ip().octets()[..];
 
@@ -69,7 +69,7 @@ impl<'a> Serialize for zipkin::Annotation<'a> {
         core::Annotation {
             timestamp: Some(self.timestamp.serialize()),
             value: Some(self.value.into()),
-            host: self.endpoint.map(|endpoint| endpoint.serialize()),
+            host: self.endpoint.clone().map(|ref endpoint| endpoint.serialize()),
         }
     }
 }
@@ -111,7 +111,7 @@ impl<'a> Serialize for zipkin::BinaryAnnotation<'a> {
             key: Some(self.key.into()),
             value: Some(value),
             annotation_type: Some(ty),
-            host: self.endpoint.map(|endpoint| endpoint.serialize()),
+            host: self.endpoint.clone().map(|ref endpoint| endpoint.serialize()),
         }
     }
 }
