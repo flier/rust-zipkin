@@ -1,3 +1,4 @@
+use std::str;
 use std::string::String;
 use std::io::prelude::*;
 use std::net::SocketAddr;
@@ -47,29 +48,22 @@ impl<'a> Serialize for zipkin::Endpoint<'a> {
         let mut attrs = Map::new();
 
         if let Some(name) = self.name {
-            attrs["serviceName"] = name.into();
+            attrs.insert("serviceName".into(), name.into());
         }
 
         match self.addr {
             Some(SocketAddr::V4(addr)) => {
-                attrs["ipv4"] = unsafe {
-                        let ip = &addr.ip().octets()[..];
-
-                        String::from_utf8_unchecked(ip.into())
-                    }
-                    .into();
+                attrs.insert("ipv4".into(), addr.ip().to_string().into());
 
                 if addr.port() > 0 {
-                    attrs["port"] = addr.port().into();
+                    attrs.insert("port".into(), addr.port().into());
                 }
             }
             Some(SocketAddr::V6(addr)) => {
-                let ip = &addr.ip().octets()[..];
-
-                attrs["ipv6"] = unsafe { String::from_utf8_unchecked(ip.into()) }.into();
+                attrs.insert("ipv6".into(), addr.ip().to_string().into());
 
                 if addr.port() > 0 {
-                    attrs["port"] = addr.port().into();
+                    attrs.insert("port".into(), addr.port().into());
                 }
             }
             None => {}
@@ -83,10 +77,10 @@ impl<'a> Serialize for zipkin::Annotation<'a> {
     fn serialize(&self) -> Value {
         let mut attrs = Map::new();
 
-        attrs["timestamp"] = self.timestamp.serialize();
-        attrs["value"] = self.value.into();
+        attrs.insert("timestamp".into(), self.timestamp.serialize());
+        attrs.insert("value".into(), self.value.into());
         if let Some(ref endpoint) = self.endpoint {
-            attrs["endpoint"] = endpoint.serialize()
+            attrs.insert("endpoint".into(), endpoint.serialize());
         }
 
         attrs.into()
@@ -97,7 +91,7 @@ impl<'a> Serialize for zipkin::BinaryAnnotation<'a> {
     fn serialize(&self) -> Value {
         let mut attrs = Map::new();
 
-        attrs["key"] = self.key.into();
+        attrs.insert("key".into(), self.key.into());
 
         let (value, ty) = match self.value {
             zipkin::Value::Bool(v) => (v.into(), None),
@@ -109,12 +103,13 @@ impl<'a> Serialize for zipkin::BinaryAnnotation<'a> {
             zipkin::Value::String(v) => (v.into(), None),
         };
 
-        attrs["value"] = value;
+        attrs.insert("value".into(), value);
+
         if let Some(ty) = ty {
-            attrs["type"] = ty.into()
+            attrs.insert("type".into(), ty.into());
         }
         if let Some(ref endpoint) = self.endpoint {
-            attrs["endpoint"] = endpoint.serialize()
+            attrs.insert("endpoint".into(), endpoint.serialize());
         }
 
         attrs.into()
@@ -125,32 +120,34 @@ impl<'a> Serialize for zipkin::Span<'a> {
     fn serialize(&self) -> Value {
         let mut attrs = Map::new();
 
-        attrs["traceId"] = self.trace_id.serialize();
-        attrs["id"] = self.id.serialize();
-        attrs["name"] = self.name.into();
+        attrs.insert("traceId".into(), self.trace_id.serialize());
+        attrs.insert("id".into(), self.id.serialize());
+        attrs.insert("name".into(), self.name.into());
         if let Some(id) = self.parent_id {
-            attrs["parentId"] = id.serialize();
+            attrs.insert("parentId".into(), id.serialize());
         }
-        attrs["timestamp"] = self.timestamp.serialize();
+        attrs.insert("timestamp".into(), self.timestamp.serialize());
         if let Some(d) = self.duration {
-            attrs["duration"] = d.serialize();
+            attrs.insert("duration".into(), d.serialize());
         }
         if !self.annotations.is_empty() {
-            attrs["annotations"] = self.annotations
-                .iter()
-                .map(|annotation| annotation.serialize())
-                .collect::<Vec<Value>>()
-                .into();
+            attrs.insert("annotations".into(),
+                         self.annotations
+                             .iter()
+                             .map(|annotation| annotation.serialize())
+                             .collect::<Vec<Value>>()
+                             .into());
         }
         if !self.binary_annotations.is_empty() {
-            attrs["binaryAnnotations"] = self.binary_annotations
-                .iter()
-                .map(|annotation| annotation.serialize())
-                .collect::<Vec<Value>>()
-                .into();
+            attrs.insert("binaryAnnotations".into(),
+                         self.binary_annotations
+                             .iter()
+                             .map(|annotation| annotation.serialize())
+                             .collect::<Vec<Value>>()
+                             .into());
         }
         if let Some(debug) = self.debug {
-            attrs["debug"] = debug.into();
+            attrs.insert("debug".into(), debug.into());
         }
 
         attrs.into()
@@ -165,10 +162,157 @@ pub fn to_string(span: &zipkin::Span) -> Result<String> {
     serde_json::ser::to_string(&to_json(span))
 }
 
+pub fn to_string_pretty(span: &zipkin::Span) -> Result<String> {
+    serde_json::ser::to_string_pretty(&to_json(span))
+}
+
 pub fn to_vec(span: &zipkin::Span) -> Result<Vec<u8>> {
     serde_json::ser::to_vec(&to_json(span))
 }
 
+pub fn to_vec_pretty(span: &zipkin::Span) -> Result<Vec<u8>> {
+    serde_json::ser::to_vec_pretty(&to_json(span))
+}
+
 pub fn to_writer<W: ?Sized + Write>(writer: &mut W, span: &zipkin::Span) -> Result<()> {
     serde_json::ser::to_writer(writer, &to_json(span))
+}
+
+pub fn to_writer_pretty<W: ?Sized + Write>(writer: &mut W, span: &zipkin::Span) -> Result<()> {
+    serde_json::ser::to_writer_pretty(writer, &to_json(span))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::rc::Rc;
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+
+    use chrono::prelude::*;
+    use diff;
+
+    use zipkin::*;
+
+    use super::*;
+
+    #[test]
+    fn encode() {
+        let mut span = Span::new("test")
+            .with_trace_id(TraceId {
+                lo: 123,
+                hi: Some(456),
+            })
+            .with_id(123)
+            .with_parent_id(456)
+            .with_debug(true);
+        let endpoint = Some(Rc::new(Endpoint {
+            name: Some("test"),
+            addr: Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080)),
+        }));
+
+        span.annotate(CLIENT_SEND, endpoint.clone());
+        span.annotate(CLIENT_RECV, None);
+        span.binary_annotate(HTTP_METHOD, "GET", endpoint.clone());
+        span.binary_annotate("debug", true, None);
+        span.binary_annotate(HTTP_STATUS_CODE, 123i16, None);
+        span.binary_annotate(HTTP_REQUEST_SIZE, -456i32, None);
+        span.binary_annotate(HTTP_RESPONSE_SIZE, -789i64, None);
+        span.binary_annotate("time", 123.456, None);
+        span.binary_annotate("raw", &b"some\0raw\0data"[..], None);
+
+
+        span.annotations[0].timestamp = UTC.timestamp(0, 0);
+        span.annotations[1].timestamp = UTC.timestamp(0, 0);
+        span.timestamp = UTC.timestamp(0, 0);
+
+        let json = to_string_pretty(&span).unwrap();
+        let diffs: Vec<String> = diff::lines(&json,
+                                             unsafe { str::from_utf8_unchecked(PRETTY_JSON) })
+            .iter()
+            .flat_map(|ref line| match **line {
+                diff::Result::Both(..) => None,
+                diff::Result::Left(s) => Some(format!("-{}", s)),
+                diff::Result::Right(s) => Some(format!("+{}", s)),
+            })
+            .collect();
+
+        assert_eq!(diffs, Vec::<String>::new());
+    }
+
+    const PRETTY_JSON: &'static [u8] = br#"{
+  "annotations": [
+    {
+      "endpoint": {
+        "ipv4": "127.0.0.1",
+        "port": 8080,
+        "serviceName": "test"
+      },
+      "timestamp": 0,
+      "value": "cs"
+    },
+    {
+      "timestamp": 0,
+      "value": "cr"
+    }
+  ],
+  "binaryAnnotations": [
+    {
+      "endpoint": {
+        "ipv4": "127.0.0.1",
+        "port": 8080,
+        "serviceName": "test"
+      },
+      "key": "http.method",
+      "value": "GET"
+    },
+    {
+      "key": "debug",
+      "value": true
+    },
+    {
+      "key": "http.status_code",
+      "type": "I16",
+      "value": 123
+    },
+    {
+      "key": "http.request.size",
+      "type": "I32",
+      "value": -456
+    },
+    {
+      "key": "http.response.size",
+      "type": "I64",
+      "value": -789
+    },
+    {
+      "key": "time",
+      "type": "DOUBLE",
+      "value": 123.456
+    },
+    {
+      "key": "raw",
+      "type": "BYTES",
+      "value": [
+        115,
+        111,
+        109,
+        101,
+        0,
+        114,
+        97,
+        119,
+        0,
+        100,
+        97,
+        116,
+        97
+      ]
+    }
+  ],
+  "debug": true,
+  "id": "000000000000007b",
+  "name": "test",
+  "parentId": "00000000000001c8",
+  "timestamp": 0,
+  "traceId": "00000000000001c8000000000000007b"
+}"#;
 }
