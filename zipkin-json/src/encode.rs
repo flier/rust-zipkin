@@ -10,12 +10,12 @@ use base64;
 
 use zipkin;
 
-trait Serialize {
-    fn serialize(&self) -> Value;
+trait ToJson {
+    fn to_json(&self) -> Value;
 }
 
-impl Serialize for zipkin::TraceId {
-    fn serialize(&self) -> Value {
+impl ToJson for zipkin::TraceId {
+    fn to_json(&self) -> Value {
         let id = match self.hi {
             Some(hi) => format!("{:016x}{:016x}", hi, self.lo),
             None => format!("{:016x}", self.lo),
@@ -25,28 +25,28 @@ impl Serialize for zipkin::TraceId {
     }
 }
 
-impl Serialize for zipkin::SpanId {
-    fn serialize(&self) -> Value {
+impl ToJson for zipkin::SpanId {
+    fn to_json(&self) -> Value {
         format!("{:016x}", self).into()
     }
 }
 
-impl Serialize for zipkin::Timestamp {
-    fn serialize(&self) -> Value {
+impl ToJson for zipkin::Timestamp {
+    fn to_json(&self) -> Value {
         let ts = self.timestamp() * 1000_000 + self.timestamp_subsec_micros() as i64;
 
         ts.into()
     }
 }
 
-impl Serialize for zipkin::Duration {
-    fn serialize(&self) -> Value {
+impl ToJson for zipkin::Duration {
+    fn to_json(&self) -> Value {
         self.num_microseconds().unwrap_or(i64::max_value()).into()
     }
 }
 
-impl<'a> Serialize for zipkin::Endpoint<'a> {
-    fn serialize(&self) -> Value {
+impl<'a> ToJson for zipkin::Endpoint<'a> {
+    fn to_json(&self) -> Value {
         let mut attrs = Map::new();
 
         if let Some(name) = self.name {
@@ -75,22 +75,22 @@ impl<'a> Serialize for zipkin::Endpoint<'a> {
     }
 }
 
-impl<'a> Serialize for zipkin::Annotation<'a> {
-    fn serialize(&self) -> Value {
+impl<'a> ToJson for zipkin::Annotation<'a> {
+    fn to_json(&self) -> Value {
         let mut attrs = Map::new();
 
-        attrs.insert("timestamp".into(), self.timestamp.serialize());
+        attrs.insert("timestamp".into(), self.timestamp.to_json());
         attrs.insert("value".into(), self.value.into());
         if let Some(ref endpoint) = self.endpoint {
-            attrs.insert("endpoint".into(), endpoint.serialize());
+            attrs.insert("endpoint".into(), endpoint.to_json());
         }
 
         attrs.into()
     }
 }
 
-impl<'a> Serialize for zipkin::BinaryAnnotation<'a> {
-    fn serialize(&self) -> Value {
+impl<'a> ToJson for zipkin::BinaryAnnotation<'a> {
+    fn to_json(&self) -> Value {
         let mut attrs = Map::new();
 
         attrs.insert("key".into(), self.key.into());
@@ -111,32 +111,32 @@ impl<'a> Serialize for zipkin::BinaryAnnotation<'a> {
             attrs.insert("type".into(), ty.into());
         }
         if let Some(ref endpoint) = self.endpoint {
-            attrs.insert("endpoint".into(), endpoint.serialize());
+            attrs.insert("endpoint".into(), endpoint.to_json());
         }
 
         attrs.into()
     }
 }
 
-impl<'a> Serialize for zipkin::Span<'a> {
-    fn serialize(&self) -> Value {
+impl<'a> ToJson for zipkin::Span<'a> {
+    fn to_json(&self) -> Value {
         let mut attrs = Map::new();
 
-        attrs.insert("traceId".into(), self.trace_id.serialize());
-        attrs.insert("id".into(), self.id.serialize());
+        attrs.insert("traceId".into(), self.trace_id.to_json());
+        attrs.insert("id".into(), self.id.to_json());
         attrs.insert("name".into(), self.name.into());
         if let Some(id) = self.parent_id {
-            attrs.insert("parentId".into(), id.serialize());
+            attrs.insert("parentId".into(), id.to_json());
         }
-        attrs.insert("timestamp".into(), self.timestamp.serialize());
+        attrs.insert("timestamp".into(), self.timestamp.to_json());
         if let Some(d) = self.duration {
-            attrs.insert("duration".into(), d.serialize());
+            attrs.insert("duration".into(), d.to_json());
         }
         if !self.annotations.is_empty() {
             attrs.insert("annotations".into(),
                          self.annotations
                              .iter()
-                             .map(|annotation| annotation.serialize())
+                             .map(|annotation| annotation.to_json())
                              .collect::<Vec<Value>>()
                              .into());
         }
@@ -144,7 +144,7 @@ impl<'a> Serialize for zipkin::Span<'a> {
             attrs.insert("binaryAnnotations".into(),
                          self.binary_annotations
                              .iter()
-                             .map(|annotation| annotation.serialize())
+                             .map(|annotation| annotation.to_json())
                              .collect::<Vec<Value>>()
                              .into());
         }
@@ -157,31 +157,31 @@ impl<'a> Serialize for zipkin::Span<'a> {
 }
 
 pub fn to_json(span: &zipkin::Span) -> Value {
-    span.serialize()
+    span.to_json()
 }
 
 pub fn to_string(span: &zipkin::Span) -> Result<String> {
-    serde_json::ser::to_string(&to_json(span))
+    serde_json::ser::to_string(&span.to_json())
 }
 
 pub fn to_string_pretty(span: &zipkin::Span) -> Result<String> {
-    serde_json::ser::to_string_pretty(&to_json(span))
+    serde_json::ser::to_string_pretty(&span.to_json())
 }
 
 pub fn to_vec(span: &zipkin::Span) -> Result<Vec<u8>> {
-    serde_json::ser::to_vec(&to_json(span))
+    serde_json::ser::to_vec(&span.to_json())
 }
 
 pub fn to_vec_pretty(span: &zipkin::Span) -> Result<Vec<u8>> {
-    serde_json::ser::to_vec_pretty(&to_json(span))
+    serde_json::ser::to_vec_pretty(&span.to_json())
 }
 
 pub fn to_writer<W: ?Sized + Write>(writer: &mut W, span: &zipkin::Span) -> Result<()> {
-    serde_json::ser::to_writer(writer, &to_json(span))
+    serde_json::ser::to_writer(writer, &span.to_json())
 }
 
 pub fn to_writer_pretty<W: ?Sized + Write>(writer: &mut W, span: &zipkin::Span) -> Result<()> {
-    serde_json::ser::to_writer_pretty(writer, &to_json(span))
+    serde_json::ser::to_writer_pretty(writer, &span.to_json())
 }
 
 #[cfg(test)]
