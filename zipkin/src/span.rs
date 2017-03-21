@@ -1,5 +1,5 @@
 use std::mem;
-use std::rc::Rc;
+use std::sync::Arc;
 use std::cell::RefCell;
 use std::net::SocketAddr;
 
@@ -76,11 +76,11 @@ pub struct Annotation<'a> {
     /// Usually a short tag indicating an event
     pub value: &'a str,
     /// The host that recorded, primarily for query by service name.
-    pub endpoint: Option<Rc<Endpoint<'a>>>,
+    pub endpoint: Option<Arc<Endpoint<'a>>>,
 }
 
 impl<'a> Annotation<'a> {
-    fn new(value: &'a str, endpoint: Option<Rc<Endpoint<'a>>>) -> Annotation<'a> {
+    fn new(value: &'a str, endpoint: Option<Arc<Endpoint<'a>>>) -> Annotation<'a> {
         Annotation {
             value: value,
             timestamp: UTC::now(),
@@ -267,13 +267,13 @@ pub struct BinaryAnnotation<'a> {
     /// Value of annotation
     pub value: Value<'a>,
     /// The host that recorded, primarily for query by service name.
-    pub endpoint: Option<Rc<Endpoint<'a>>>,
+    pub endpoint: Option<Arc<Endpoint<'a>>>,
 }
 
 impl<'a> BinaryAnnotation<'a> {
     pub fn new<V>(key: &'a str,
                   value: V,
-                  endpoint: Option<Rc<Endpoint<'a>>>)
+                  endpoint: Option<Arc<Endpoint<'a>>>)
                   -> BinaryAnnotation<'a>
         where V: Sized + BinaryAnnotationValue<'a>
     {
@@ -336,14 +336,14 @@ impl<'a> Span<'a> {
         Span { debug: Some(debug), ..self }
     }
 
-    pub fn annotate(&mut self, value: &'a str, endpoint: Option<Rc<Endpoint<'a>>>) {
+    pub fn annotate(&mut self, value: &'a str, endpoint: Option<Arc<Endpoint<'a>>>) {
         self.annotations.push(Annotation::new(value, endpoint))
     }
 
     pub fn binary_annotate<V>(&mut self,
                               key: &'a str,
                               value: V,
-                              endpoint: Option<Rc<Endpoint<'a>>>)
+                              endpoint: Option<Arc<Endpoint<'a>>>)
         where V: Sized + BinaryAnnotationValue<'a>
     {
         self.binary_annotations.push(BinaryAnnotation::new(key, value, endpoint))
@@ -352,7 +352,7 @@ impl<'a> Span<'a> {
 
 #[cfg(test)]
 mod tests {
-    use std::rc::Rc;
+    use std::Arc::Arc;
 
     use super::*;
     use super::super::*;
@@ -395,7 +395,7 @@ mod tests {
     #[test]
     fn annonation() {
         let mut span = Span::new("test");
-        let endpoint = Some(Rc::new(Endpoint {
+        let endpoint = Some(Arc::new(Endpoint {
             name: Some("test"),
             addr: None,
         }));
