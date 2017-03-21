@@ -6,6 +6,8 @@ use std::net::SocketAddr;
 use serde_json;
 use serde_json::{Map, Value, Result};
 
+use base64;
+
 use zipkin;
 
 trait Serialize {
@@ -95,7 +97,7 @@ impl<'a> Serialize for zipkin::BinaryAnnotation<'a> {
 
         let (value, ty) = match self.value {
             zipkin::Value::Bool(v) => (v.into(), None),
-            zipkin::Value::Bytes(v) => (v.into(), Some("BYTES")),
+            zipkin::Value::Bytes(v) => (base64::encode(v).into(), Some("BYTES")),
             zipkin::Value::I16(v) => (v.into(), Some("I16")),
             zipkin::Value::I32(v) => (v.into(), Some("I32")),
             zipkin::Value::I64(v) => (v.into(), Some("I64")),
@@ -291,21 +293,7 @@ mod tests {
     {
       "key": "raw",
       "type": "BYTES",
-      "value": [
-        115,
-        111,
-        109,
-        101,
-        0,
-        114,
-        97,
-        119,
-        0,
-        100,
-        97,
-        116,
-        97
-      ]
+      "value": "c29tZQByYXcAZGF0YQ=="
     }
   ],
   "debug": true,

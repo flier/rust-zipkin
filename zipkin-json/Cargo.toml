@@ -5,6 +5,8 @@ authors = ["Flier Lu <flier.lu@gmail.com>"]
 
 [dependencies]
 serde_json = "0.9"
+base64 = "0.4"
+
 zipkin = { path="../zipkin" }
 
 [dev-dependencies]

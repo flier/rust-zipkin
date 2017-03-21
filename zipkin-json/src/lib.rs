@@ -1,4 +1,5 @@
 extern crate serde_json;
+extern crate base64;
 extern crate zipkin;
 
 #[cfg(test)]
