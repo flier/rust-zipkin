@@ -6,7 +6,6 @@ authors = ["Flier Lu <flier.lu@gmail.com>"]
 [dependencies]
 error-chain = "0.10"
 futures = "0.1"
-futures-cpupool = "0.1"
 kafka = "0.5"
 
 [dependencies.zipkin]
