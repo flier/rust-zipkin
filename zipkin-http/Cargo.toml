@@ -4,3 +4,9 @@ version = "0.1.0"
 authors = ["Flier Lu <flier.lu@gmail.com>"]
 
 [dependencies]
+error-chain = "0.10"
+tokio-io = "0.1"
+bytes = "0.4"
+hyper = "0.10"
+
+zipkin = { path = "../zipkin" }

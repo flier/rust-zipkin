@@ -7,7 +7,7 @@ extern crate futures;
 extern crate futures_cpupool;
 
 mod constants;
-mod errors;
+pub mod errors;
 mod span;
 mod tracer;
 mod collector;

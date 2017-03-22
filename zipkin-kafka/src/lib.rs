@@ -6,7 +6,7 @@ extern crate bytes;
 extern crate kafka;
 extern crate zipkin;
 
-mod errors;
+pub mod errors;
 mod collector;
 
 pub use collector::{KafkaConfig, KafkaCollector};
