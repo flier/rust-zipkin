@@ -1,6 +1,7 @@
 use std::mem;
 use std::sync::Arc;
 use std::cell::RefCell;
+use std::time::Duration;
 use std::net::SocketAddr;
 
 use chrono;
@@ -56,8 +57,6 @@ pub type SpanId = u64;
 
 /// Epoch microseconds
 pub type Timestamp = DateTime<UTC>;
-
-pub type Duration = chrono::Duration;
 
 /// Indicates the network context of a service recording an annotation with two exceptions.
 #[derive(Clone, Debug)]
@@ -352,7 +351,7 @@ impl<'a> Span<'a> {
 
 #[cfg(test)]
 mod tests {
-    use std::Arc::Arc;
+    use std::sync::Arc;
 
     use super::*;
     use super::super::*;

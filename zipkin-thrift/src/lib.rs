@@ -14,3 +14,14 @@ mod errors;
 mod encode;
 
 pub use encode::{to_thrift, to_vec, to_writer};
+
+#[cfg(feature = "future")]
+extern crate tokio_io;
+#[cfg(feature = "future")]
+extern crate bytes;
+
+#[cfg(feature = "future")]
+mod codec;
+
+#[cfg(feature = "future")]
+pub use codec::ThriftCodec;

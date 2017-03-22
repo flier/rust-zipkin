@@ -1,5 +1,6 @@
 use std::str;
 use std::string::String;
+use std::time::Duration;
 use std::io::prelude::*;
 use std::net::SocketAddr;
 
@@ -10,7 +11,7 @@ use base64;
 
 use zipkin;
 
-trait ToJson {
+pub trait ToJson {
     fn to_json(&self) -> Value;
 }
 
@@ -39,9 +40,9 @@ impl ToJson for zipkin::Timestamp {
     }
 }
 
-impl ToJson for zipkin::Duration {
+impl ToJson for Duration {
     fn to_json(&self) -> Value {
-        self.num_microseconds().unwrap_or(i64::max_value()).into()
+        From::from(self.as_secs() * 1000_000 + self.subsec_nanos() as u64 / 1000)
     }
 }
 
@@ -156,37 +157,37 @@ impl<'a> ToJson for zipkin::Span<'a> {
     }
 }
 
-pub fn to_json(span: &zipkin::Span) -> Value {
-    span.to_json()
+pub fn to_json<T: ToJson>(value: &T) -> Value {
+    value.to_json()
 }
 
-pub fn to_string(span: &zipkin::Span) -> Result<String> {
-    serde_json::ser::to_string(&span.to_json())
+pub fn to_string<T: ToJson>(value: &T) -> Result<String> {
+    serde_json::ser::to_string(&value.to_json())
 }
 
-pub fn to_string_pretty(span: &zipkin::Span) -> Result<String> {
-    serde_json::ser::to_string_pretty(&span.to_json())
+pub fn to_string_pretty<T: ToJson>(value: &T) -> Result<String> {
+    serde_json::ser::to_string_pretty(&value.to_json())
 }
 
-pub fn to_vec(span: &zipkin::Span) -> Result<Vec<u8>> {
-    serde_json::ser::to_vec(&span.to_json())
+pub fn to_vec<T: ToJson>(value: &T) -> Result<Vec<u8>> {
+    serde_json::ser::to_vec(&value.to_json())
 }
 
-pub fn to_vec_pretty(span: &zipkin::Span) -> Result<Vec<u8>> {
-    serde_json::ser::to_vec_pretty(&span.to_json())
+pub fn to_vec_pretty<T: ToJson>(value: &T) -> Result<Vec<u8>> {
+    serde_json::ser::to_vec_pretty(&value.to_json())
 }
 
-pub fn to_writer<W: ?Sized + Write>(writer: &mut W, span: &zipkin::Span) -> Result<()> {
-    serde_json::ser::to_writer(writer, &span.to_json())
+pub fn to_writer<W: ?Sized + Write, T: ToJson>(writer: &mut W, value: &T) -> Result<()> {
+    serde_json::ser::to_writer(writer, &value.to_json())
 }
 
-pub fn to_writer_pretty<W: ?Sized + Write>(writer: &mut W, span: &zipkin::Span) -> Result<()> {
-    serde_json::ser::to_writer_pretty(writer, &span.to_json())
+pub fn to_writer_pretty<W: ?Sized + Write, T: ToJson>(writer: &mut W, value: &T) -> Result<()> {
+    serde_json::ser::to_writer_pretty(writer, &value.to_json())
 }
 
 #[cfg(test)]
 mod tests {
-    use std::rc::Rc;
+    use std::sync::Arc;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
     use chrono::prelude::*;
@@ -197,7 +198,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn encode() {
+    fn to_json() {
         let mut span = Span::new("test")
             .with_trace_id(TraceId {
                 lo: 123,
@@ -206,7 +207,7 @@ mod tests {
             .with_id(123)
             .with_parent_id(456)
             .with_debug(true);
-        let endpoint = Some(Rc::new(Endpoint {
+        let endpoint = Some(Arc::new(Endpoint {
             name: Some("test"),
             addr: Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080)),
         }));

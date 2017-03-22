@@ -2,12 +2,14 @@ use std::ptr;
 use std::mem;
 use std::rc::Rc;
 use std::cell::RefCell;
+use std::time::Duration;
 use std::io::prelude::*;
 use std::net::SocketAddr;
 
 use byteorder::{BigEndian, WriteBytesExt};
 
-use thrift::protocol::TBinaryOutputProtocol;
+use thrift;
+use thrift::protocol::{TOutputProtocol, TBinaryOutputProtocol};
 use thrift::transport::{TBufferTransport, TPassThruTransport};
 
 use zipkin;
@@ -15,26 +17,51 @@ use zipkin;
 use core;
 use errors::Result;
 
-trait ToThrift {
-    type Output;
-
-    fn to_thrift(&self) -> Self::Output;
+trait ToI64 {
+    fn to_i64(&self) -> i64;
 }
 
-impl ToThrift for zipkin::Timestamp {
-    type Output = i64;
-
-    fn to_thrift(&self) -> Self::Output {
+impl ToI64 for zipkin::Timestamp {
+    fn to_i64(&self) -> i64 {
         self.timestamp() * 1000_000 + self.timestamp_subsec_micros() as i64
     }
 }
 
-impl ToThrift for zipkin::Duration {
-    type Output = i64;
-
-    fn to_thrift(&self) -> Self::Output {
-        self.num_microseconds().unwrap_or(i64::max_value()).into()
+impl ToI64 for Duration {
+    fn to_i64(&self) -> i64 {
+        From::from(self.as_secs() as i64 * 1000_000 + self.subsec_nanos() as i64 / 1000)
     }
+}
+
+pub trait ProtocolWriter {
+    fn write_to_protocol(&self, proto: &mut TOutputProtocol) -> thrift::Result<()>;
+}
+
+impl ProtocolWriter for core::Endpoint {
+    fn write_to_protocol(&self, proto: &mut TOutputProtocol) -> thrift::Result<()> {
+        self.write_to_out_protocol(proto)
+    }
+}
+impl ProtocolWriter for core::Annotation {
+    fn write_to_protocol(&self, proto: &mut TOutputProtocol) -> thrift::Result<()> {
+        self.write_to_out_protocol(proto)
+    }
+}
+impl ProtocolWriter for core::BinaryAnnotation {
+    fn write_to_protocol(&self, proto: &mut TOutputProtocol) -> thrift::Result<()> {
+        self.write_to_out_protocol(proto)
+    }
+}
+impl ProtocolWriter for core::Span {
+    fn write_to_protocol(&self, proto: &mut TOutputProtocol) -> thrift::Result<()> {
+        self.write_to_out_protocol(proto)
+    }
+}
+
+pub trait ToThrift {
+    type Output: ProtocolWriter;
+
+    fn to_thrift(&self) -> Self::Output;
 }
 
 impl<'a> ToThrift for zipkin::Endpoint<'a> {
@@ -67,7 +94,7 @@ impl<'a> ToThrift for zipkin::Annotation<'a> {
 
     fn to_thrift(&self) -> Self::Output {
         core::Annotation {
-            timestamp: Some(self.timestamp.to_thrift()),
+            timestamp: Some(self.timestamp.to_i64()),
             value: Some(self.value.into()),
             host: self.endpoint.clone().map(|ref endpoint| endpoint.to_thrift()),
         }
@@ -145,17 +172,17 @@ impl<'a> ToThrift for zipkin::Span<'a> {
                     .into()
             },
             debug: self.debug,
-            timestamp: Some(self.timestamp.to_thrift()),
-            duration: self.duration.map(|d| d.to_thrift()),
+            timestamp: Some(self.timestamp.to_i64()),
+            duration: self.duration.map(|d| d.to_i64()),
         }
     }
 }
 
-pub fn to_thrift(span: &zipkin::Span) -> core::Span {
-    span.to_thrift()
+pub fn to_thrift<T: ToThrift>(value: &T) -> T::Output {
+    value.to_thrift()
 }
 
-pub fn to_vec(span: &zipkin::Span) -> Result<Vec<u8>> {
+pub fn to_vec<T: ToThrift>(value: &T) -> Result<Vec<u8>> {
     let buf = Rc::new(RefCell::new(Box::new(TBufferTransport::with_capacity(0, 4096))));
     let mut proto =
         TBinaryOutputProtocol::new(Rc::new(RefCell::new(Box::new(TPassThruTransport {
@@ -163,14 +190,14 @@ pub fn to_vec(span: &zipkin::Span) -> Result<Vec<u8>> {
                                    }))),
                                    true);
 
-    to_thrift(span).write_to_out_protocol(&mut proto)?;
+    value.to_thrift().write_to_protocol(&mut proto)?;
 
     let bytes = buf.borrow_mut().write_buffer_to_vec();
 
     Ok(bytes)
 }
 
-pub fn to_writer<W: ?Sized + Write>(writer: &mut W, span: &zipkin::Span) -> Result<usize> {
+pub fn to_writer<W: ?Sized + Write, T: ToThrift>(writer: &mut W, value: &T) -> Result<usize> {
     let buf = Rc::new(RefCell::new(Box::new(TBufferTransport::with_capacity(0, 4096))));
     let mut proto =
         TBinaryOutputProtocol::new(Rc::new(RefCell::new(Box::new(TPassThruTransport {
@@ -178,7 +205,7 @@ pub fn to_writer<W: ?Sized + Write>(writer: &mut W, span: &zipkin::Span) -> Resu
                                    }))),
                                    true);
 
-    to_thrift(span).write_to_out_protocol(&mut proto)?;
+    value.to_thrift().write_to_protocol(&mut proto)?;
 
     let wrote = writer.write(buf.borrow().write_buffer_as_ref())?;
 
@@ -187,7 +214,7 @@ pub fn to_writer<W: ?Sized + Write>(writer: &mut W, span: &zipkin::Span) -> Resu
 
 #[cfg(test)]
 mod tests {
-    use std::rc::Rc;
+    use std::sync::Arc;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
     use chrono::prelude::*;
@@ -198,7 +225,7 @@ mod tests {
     use super::super::core;
 
     #[test]
-    fn encode() {
+    fn to_thrift() {
         let mut span = Span::new("test")
             .with_trace_id(TraceId {
                 lo: 123,
@@ -207,7 +234,7 @@ mod tests {
             .with_id(123)
             .with_parent_id(456)
             .with_debug(true);
-        let endpoint = Some(Rc::new(Endpoint {
+        let endpoint = Some(Arc::new(Endpoint {
             name: Some("test"),
             addr: Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080)),
         }));
