@@ -15,7 +15,6 @@ mod encode;
 pub use encode::{to_json, to_string, to_string_pretty, to_vec, to_vec_pretty, to_writer,
                  to_writer_pretty};
 
-
 #[cfg(feature = "future")]
 extern crate tokio_io;
 #[cfg(feature = "future")]

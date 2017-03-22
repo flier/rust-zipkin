@@ -4,7 +4,6 @@ use std::cell::RefCell;
 use std::time::Duration;
 use std::net::SocketAddr;
 
-use chrono;
 use chrono::prelude::*;
 
 use rand::{self, Rng};
