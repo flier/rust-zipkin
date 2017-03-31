@@ -340,6 +340,10 @@ impl<'a> Span<'a> {
         Span { sampled: Some(sampled), ..self }
     }
 
+    pub fn used(&self) -> bool {
+        self.debug == Some(true) || self.sampled != Some(false)
+    }
+
     pub fn annotate(&mut self, value: &'a str, endpoint: Option<Arc<Endpoint<'a>>>) {
         self.annotations.push(Annotation::new(value, endpoint))
     }
@@ -352,6 +356,25 @@ impl<'a> Span<'a> {
     {
         self.binary_annotations.push(BinaryAnnotation::new(key, value, endpoint))
     }
+}
+
+macro_rules! annotate {
+    ($span:ident, $value:expr) => {
+        annotate!($span, $value, endpoint => None)
+    };
+    ($span:ident, $value:expr, endpoint => $endpoint:expr) => {
+        if $span.used() {
+            $span.annotate($value, $endpoint);
+        }
+    };
+    ($span:ident, $key:expr, $value:expr) => {
+        annotate!($span, $key, $value, endpoint => None)
+    };
+    ($span:ident, $key:expr, $value:expr, endpoint => $endpoint:expr) => {
+        if $span.used() {
+            $span.binary_annotate($key, $value, $endpoint);
+        }
+    };
 }
 
 #[cfg(test)]
@@ -514,6 +537,65 @@ mod tests {
             assert_eq!(annonation.key, HTTP_RESPONSE_SIZE);
             assert_eq!(annonation.value, Value::I64(-9223372036854775808));
             assert_eq!(annonation.value.as_u64(), Some(0x8000000000000000));
+        }
+    }
+
+    #[test]
+    fn macros() {
+        let mut span = Span::new("test");
+        let endpoint = Some(Arc::new(Endpoint {
+            name: Some("test"),
+            addr: None,
+        }));
+
+        annotate!(span, CLIENT_SEND);
+        {
+            let annonation = span.annotations.last().unwrap();
+
+            assert_eq!(span.annotations.len(), 1);
+            assert_eq!(annonation.value, CLIENT_SEND);
+        }
+
+        annotate!(span, CLIENT_RECV, endpoint => endpoint.clone());
+        {
+            let annonation = span.annotations.last().unwrap();
+
+            assert_eq!(span.annotations.len(), 2);
+            assert_eq!(annonation.value, CLIENT_RECV);
+            assert_eq!(annonation.endpoint.as_ref().unwrap().name, Some("test"));
+        }
+
+        annotate!(span, HTTP_METHOD, "GET");
+        {
+            let annonation = span.binary_annotations.last().unwrap();
+
+            assert_eq!(span.binary_annotations.len(), 1);
+            assert_eq!(annonation.key, HTTP_METHOD);
+            assert_eq!(annonation.value, Value::String("GET"));
+        }
+
+        annotate!(span, HTTP_STATUS_CODE, 123i16, endpoint => endpoint.clone());
+        {
+            let annonation = span.binary_annotations.last().unwrap();
+
+            assert_eq!(span.binary_annotations.len(), 2);
+            assert_eq!(annonation.key, HTTP_STATUS_CODE);
+            assert_eq!(annonation.value, Value::I16(123));
+            assert_eq!(annonation.endpoint.as_ref().unwrap().name, Some("test"));
+        }
+
+        span = span.with_sampled(false);
+
+        annotate!(span, CLIENT_SEND);
+        {
+            assert_eq!(span.annotations.len(), 2);
+        }
+
+        span = span.with_debug(true);
+
+        annotate!(span, HTTP_METHOD, "GET");
+        {
+            assert_eq!(span.binary_annotations.len(), 3);
         }
     }
 }
