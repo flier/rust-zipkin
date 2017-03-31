@@ -15,6 +15,6 @@ mod collector;
 
 pub use constants::*;
 pub use span::{TraceId, SpanId, Timestamp, Endpoint, Annotation, Value, BinaryAnnotation, Span};
-pub use sampler::{FixedRate, RateLimit};
+pub use sampler::{Sampler, FixedRate, RateLimit};
 pub use tracer::Tracer;
 pub use collector::Collector;

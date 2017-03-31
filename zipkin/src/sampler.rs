@@ -9,11 +9,14 @@ pub trait Sampler {
     fn sample(&mut self, item: &Self::Item) -> bool;
 }
 
+/// Fixed rate sampling
 pub struct FixedRate<T> {
     pub sample_rate: usize,
     total_items: AtomicUsize,
     phantom: PhantomData<T>,
 }
+
+unsafe impl<T> Sync for FixedRate<T> {}
 
 impl<T> FixedRate<T> {
     pub fn new(sample_rate: usize) -> Self {
@@ -39,14 +42,17 @@ impl<T> Sampler for FixedRate<T> {
     }
 }
 
+/// Rate limiting with token bucket
 pub struct RateLimit<T> {
     pub quantum: usize,
     pub capacity: usize,
     pub interval: Duration,
-    ts: Instant,
     tokens: AtomicIsize,
+    ts: Instant,
     phantom: PhantomData<T>,
 }
+
+unsafe impl<T> Sync for RateLimit<T> {}
 
 impl<T> RateLimit<T> {
     pub fn new(quantum: usize, capacity: usize, interval: Duration) -> Self {
@@ -54,8 +60,8 @@ impl<T> RateLimit<T> {
             quantum: quantum,
             capacity: cmp::max(quantum, capacity),
             interval: interval,
-            ts: Instant::now(),
             tokens: AtomicIsize::new(quantum as isize),
+            ts: Instant::now(),
             phantom: PhantomData,
         }
     }
@@ -105,7 +111,7 @@ impl<T> Sampler for RateLimit<T> {
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
-    use std::thread::sleep;
+    use std::thread::{self, sleep};
 
     use super::*;
 
@@ -117,6 +123,15 @@ mod tests {
         assert!(!sampler.sample(&2));
         assert!(!sampler.sample(&3));
         assert!(sampler.sample(&4));
+
+        thread::spawn(move || {
+                assert!(!sampler.sample(&5));
+                assert!(!sampler.sample(&6));
+                assert!(sampler.sample(&7));
+                assert!(!sampler.sample(&8));
+            })
+            .join()
+            .unwrap();
     }
 
     #[test]
