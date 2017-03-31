@@ -10,6 +10,7 @@ pub trait Sampler {
 }
 
 /// Fixed rate sampling
+#[derive(Debug)]
 pub struct FixedRate<T> {
     pub sample_rate: usize,
     total_items: AtomicUsize,
@@ -43,6 +44,7 @@ impl<T> Sampler for FixedRate<T> {
 }
 
 /// Rate limiting with token bucket
+#[derive(Debug)]
 pub struct RateLimit<T> {
     pub quantum: usize,
     pub capacity: usize,

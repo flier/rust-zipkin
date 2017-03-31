@@ -305,6 +305,8 @@ pub struct Span<'a> {
     pub binary_annotations: Vec<BinaryAnnotation<'a>>,
     /// A request to store this span even if it overrides sampling policy.
     pub debug: Option<bool>,
+    /// Span was sampled base on the sampling policy.
+    pub sampled: Option<bool>,
 }
 
 impl<'a> Span<'a> {
@@ -332,6 +334,10 @@ impl<'a> Span<'a> {
 
     pub fn with_debug(self, debug: bool) -> Self {
         Span { debug: Some(debug), ..self }
+    }
+
+    pub fn with_sampled(self, sampled: bool) -> Self {
+        Span { sampled: Some(sampled), ..self }
     }
 
     pub fn annotate(&mut self, value: &'a str, endpoint: Option<Arc<Endpoint<'a>>>) {
