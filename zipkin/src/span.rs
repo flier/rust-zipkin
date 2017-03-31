@@ -339,22 +339,54 @@ impl<'a> Span<'a> {
     pub fn with_sampled(self, sampled: bool) -> Self {
         Span { sampled: Some(sampled), ..self }
     }
+}
 
-    pub fn used(&self) -> bool {
+pub trait Annotatable<'a> {
+    fn used(&self) -> bool;
+
+    fn annotate(&mut self, value: &'a str, endpoint: Option<Arc<Endpoint<'a>>>);
+
+    fn binary_annotate<V>(&mut self, key: &'a str, value: V, endpoint: Option<Arc<Endpoint<'a>>>)
+        where V: Sized + BinaryAnnotationValue<'a>;
+}
+
+impl<'a> Annotatable<'a> for Span<'a> {
+    fn used(&self) -> bool {
         self.debug == Some(true) || self.sampled != Some(false)
     }
 
-    pub fn annotate(&mut self, value: &'a str, endpoint: Option<Arc<Endpoint<'a>>>) {
+    fn annotate(&mut self, value: &'a str, endpoint: Option<Arc<Endpoint<'a>>>) {
         self.annotations.push(Annotation::new(value, endpoint))
     }
 
-    pub fn binary_annotate<V>(&mut self,
-                              key: &'a str,
-                              value: V,
-                              endpoint: Option<Arc<Endpoint<'a>>>)
+    fn binary_annotate<V>(&mut self, key: &'a str, value: V, endpoint: Option<Arc<Endpoint<'a>>>)
         where V: Sized + BinaryAnnotationValue<'a>
     {
         self.binary_annotations.push(BinaryAnnotation::new(key, value, endpoint))
+    }
+}
+
+impl<'a> Annotatable<'a> for Option<Span<'a>> {
+    fn used(&self) -> bool {
+        if let Some(Span { debug, sampled, .. }) = *self {
+            debug == Some(true) || sampled != Some(false)
+        } else {
+            false
+        }
+    }
+
+    fn annotate(&mut self, value: &'a str, endpoint: Option<Arc<Endpoint<'a>>>) {
+        if let Some(&mut Span { ref mut annotations, .. }) = self.as_mut() {
+            annotations.push(Annotation::new(value, endpoint))
+        }
+    }
+
+    fn binary_annotate<V>(&mut self, key: &'a str, value: V, endpoint: Option<Arc<Endpoint<'a>>>)
+        where V: Sized + BinaryAnnotationValue<'a>
+    {
+        if let Some(&mut Span { ref mut binary_annotations, .. }) = self.as_mut() {
+            binary_annotations.push(BinaryAnnotation::new(key, value, endpoint))
+        }
     }
 }
 
@@ -597,5 +629,20 @@ mod tests {
         {
             assert_eq!(span.binary_annotations.len(), 3);
         }
+
+        let mut span = Some(span);
+
+        annotate!(span, CLIENT_RECV_FRAGMENT);
+        {
+            assert_eq!(span.map(|span| {
+                               (span.annotations.len(), span.annotations.last().unwrap().value)
+                           })
+                           .unwrap(),
+                       (3, CLIENT_RECV_FRAGMENT));
+        }
+
+        span = None;
+
+        annotate!(span, CLIENT_RECV_FRAGMENT);
     }
 }

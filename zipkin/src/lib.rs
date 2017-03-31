@@ -6,6 +6,7 @@ extern crate chrono;
 extern crate futures;
 extern crate futures_cpupool;
 
+pub mod prelude;
 mod constants;
 pub mod errors;
 mod span;
@@ -14,7 +15,8 @@ mod tracer;
 mod collector;
 
 pub use constants::*;
-pub use span::{TraceId, SpanId, Timestamp, Endpoint, Annotation, Value, BinaryAnnotation, Span};
+pub use span::{TraceId, SpanId, Timestamp, Endpoint, Annotation, Value, BinaryAnnotation,
+               Annotatable, Span};
 pub use sampler::{Sampler, FixedRate, RateLimit};
 pub use tracer::Tracer;
 pub use collector::Collector;
