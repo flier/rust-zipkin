@@ -1,0 +1,20 @@
+[package]
+name = "zipkin"
+version = "0.1.0"
+authors = ["Flier Lu <flier.lu@gmail.com>"]
+
+[features]
+default = ["async", "json", "thrift", "kafka", "http"]
+async = ["zipkin-async"]
+json = ["zipkin-json"]
+thrift = ["zipkin-thrift"]
+kafka = ["zipkin-kafka"]
+http = ["zipkin-http"]
+
+[dependencies]
+zipkin-core = { path = "../zipkin-core" }
+zipkin-async = { path = "../zipkin-async", optional = true }
+zipkin-json = { path = "../zipkin-json", optional = true }
+zipkin-thrift = { path = "../zipkin-thrift", optional = true }
+zipkin-http = { path = "../zipkin-http", optional = true }
+zipkin-kafka = { path = "../zipkin-kafka", optional = true }

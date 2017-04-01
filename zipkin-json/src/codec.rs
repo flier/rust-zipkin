@@ -7,16 +7,12 @@ use bytes::{BytesMut, BufMut};
 use errors::Error;
 use encode::{ToJson, to_writer, to_writer_pretty};
 
-pub struct JsonCodec<T>
-    where T: ToJson
-{
+pub struct JsonCodec<T> {
     pub pretty_print: bool,
     phantom: PhantomData<T>,
 }
 
-impl<T> JsonCodec<T>
-    where T: ToJson
-{
+impl<T> JsonCodec<T> {
     pub fn new() -> Self {
         JsonCodec {
             pretty_print: false,
