@@ -11,7 +11,7 @@ extern crate chrono;
 #[cfg(test)]
 extern crate diff;
 
-mod errors;
+pub mod errors;
 mod encode;
 mod codec;
 

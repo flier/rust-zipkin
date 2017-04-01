@@ -12,7 +12,7 @@ extern crate zipkin;
 extern crate chrono;
 
 mod core;
-mod errors;
+pub mod errors;
 mod encode;
 mod codec;
 
