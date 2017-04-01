@@ -19,3 +19,14 @@ zipkin-json = { path = "../zipkin-json", optional = true }
 zipkin-thrift = { path = "../zipkin-thrift", optional = true }
 zipkin-http = { path = "../zipkin-http", optional = true }
 zipkin-kafka = { path = "../zipkin-kafka", optional = true }
+
+[dev-dependencies]
+error-chain = "0.10"
+log = "0.3"
+pretty_env_logger = "0.1"
+clap = "2"
+hyper = "0.10"
+hyper-native-tls = "0.2"
+serde_json = "0.9"
+mime = "0.2"
+num_cpus = "1.3"

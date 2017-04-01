@@ -1,4 +1,3 @@
-#[macro_use]
 extern crate zipkin_core;
 
 pub use zipkin_core::constants::*;
