@@ -6,8 +6,7 @@ extern crate chrono;
 extern crate bytes;
 extern crate tokio_io;
 
-pub mod prelude;
-mod constants;
+pub mod constants;
 pub mod errors;
 mod span;
 mod sampler;

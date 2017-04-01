@@ -10,6 +10,7 @@ json = ["zipkin-json"]
 thrift = ["zipkin-thrift"]
 kafka = ["zipkin-kafka"]
 http = ["zipkin-http"]
+doc = []
 
 [dependencies]
 zipkin-core = { path = "../zipkin-core" }
