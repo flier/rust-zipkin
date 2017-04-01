@@ -7,5 +7,4 @@ authors = ["Flier Lu <flier.lu@gmail.com>"]
 error-chain = "0.10"
 kafka = "0.5"
 
-[dependencies.zipkin]
-path = "../zipkin"
+zipkin-core = { path = "../zipkin-core" }

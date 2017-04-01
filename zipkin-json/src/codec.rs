@@ -57,7 +57,7 @@ mod tests {
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use bytes::BytesMut;
 
-    use zipkin::*;
+    use zipkin_core::*;
 
     use super::*;
 

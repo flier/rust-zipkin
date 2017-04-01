@@ -5,7 +5,7 @@ use hyper::mime::Mime;
 use hyper::client::{pool, Client, RedirectPolicy};
 use hyper::header::{Headers, ContentType};
 
-use zipkin;
+use zipkin_core::Transport;
 
 use errors::{Error, ErrorKind, Result};
 
@@ -53,7 +53,7 @@ impl HttpTransport {
     }
 }
 
-impl<B: AsRef<[u8]>> zipkin::Transport<B> for HttpTransport {
+impl<B: AsRef<[u8]>> Transport<B> for HttpTransport {
     type Output = ();
     type Error = Error;
 

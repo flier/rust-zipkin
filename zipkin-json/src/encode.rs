@@ -9,13 +9,14 @@ use serde_json::{Map, Value, Result};
 
 use base64;
 
-use zipkin;
+use zipkin_core::{self as zipkin, TraceId, SpanId, Timestamp, Endpoint, Annotation,
+                  BinaryAnnotation, Span};
 
 pub trait ToJson {
     fn to_json(&self) -> Value;
 }
 
-impl ToJson for zipkin::TraceId {
+impl ToJson for TraceId {
     fn to_json(&self) -> Value {
         let id = match self.hi {
             Some(hi) => format!("{:016x}{:016x}", hi, self.lo),
@@ -26,13 +27,13 @@ impl ToJson for zipkin::TraceId {
     }
 }
 
-impl ToJson for zipkin::SpanId {
+impl ToJson for SpanId {
     fn to_json(&self) -> Value {
         format!("{:016x}", self).into()
     }
 }
 
-impl ToJson for zipkin::Timestamp {
+impl ToJson for Timestamp {
     fn to_json(&self) -> Value {
         let ts = self.timestamp() * 1000_000 + self.timestamp_subsec_micros() as i64;
 
@@ -46,7 +47,7 @@ impl ToJson for Duration {
     }
 }
 
-impl<'a> ToJson for zipkin::Endpoint<'a> {
+impl<'a> ToJson for Endpoint<'a> {
     fn to_json(&self) -> Value {
         let mut attrs = Map::new();
 
@@ -76,7 +77,7 @@ impl<'a> ToJson for zipkin::Endpoint<'a> {
     }
 }
 
-impl<'a> ToJson for zipkin::Annotation<'a> {
+impl<'a> ToJson for Annotation<'a> {
     fn to_json(&self) -> Value {
         let mut attrs = Map::new();
 
@@ -90,7 +91,7 @@ impl<'a> ToJson for zipkin::Annotation<'a> {
     }
 }
 
-impl<'a> ToJson for zipkin::BinaryAnnotation<'a> {
+impl<'a> ToJson for BinaryAnnotation<'a> {
     fn to_json(&self) -> Value {
         let mut attrs = Map::new();
 
@@ -119,7 +120,7 @@ impl<'a> ToJson for zipkin::BinaryAnnotation<'a> {
     }
 }
 
-impl<'a> ToJson for zipkin::Span<'a> {
+impl<'a> ToJson for Span<'a> {
     fn to_json(&self) -> Value {
         let mut attrs = Map::new();
 
@@ -199,7 +200,7 @@ mod tests {
     use chrono::prelude::*;
     use diff;
 
-    use zipkin::*;
+    use zipkin_core::*;
 
     use super::*;
 

@@ -13,7 +13,7 @@ use thrift;
 use thrift::protocol::{TListIdentifier, TType, TOutputProtocol, TBinaryOutputProtocol};
 use thrift::transport::{TBufferTransport, TPassThruTransport};
 
-use zipkin;
+use zipkin_core as zipkin;
 
 use core;
 use errors::Result;
@@ -235,7 +235,7 @@ mod tests {
 
     use chrono::prelude::*;
 
-    use zipkin::*;
+    use zipkin_core::*;
 
     use super::*;
     use super::super::core;

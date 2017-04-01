@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use kafka::producer::{Producer, Record, Compression, RequiredAcks};
 
-use zipkin;
+use zipkin_core::Transport;
 
 use errors::{Error, Result};
 
@@ -50,7 +50,7 @@ impl KafkaTransport {
     }
 }
 
-impl<B: AsRef<[u8]>> zipkin::Transport<B> for KafkaTransport {
+impl<B: AsRef<[u8]>> Transport<B> for KafkaTransport {
     type Output = ();
     type Error = Error;
 

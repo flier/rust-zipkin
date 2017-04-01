@@ -1,5 +1,5 @@
 [package]
-name = "zipkin"
+name = "zipkin-core"
 version = "0.1.0"
 authors = ["Flier Lu <flier.lu@gmail.com>"]
 

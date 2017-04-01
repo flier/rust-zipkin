@@ -6,7 +6,8 @@ extern crate thrift;
 extern crate try_from;
 extern crate bytes;
 extern crate tokio_io;
-extern crate zipkin;
+
+extern crate zipkin_core;
 
 #[cfg(test)]
 extern crate chrono;

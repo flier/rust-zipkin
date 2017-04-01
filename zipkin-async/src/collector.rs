@@ -8,7 +8,7 @@ use bytes::BytesMut;
 
 use tokio_io::codec::Encoder;
 
-use zipkin::{Span, Transport, Collector};
+use zipkin_core::{Span, Transport, Collector};
 
 use errors::Error;
 
@@ -88,7 +88,7 @@ mod tests {
 
     use tokio_io::codec::Encoder;
 
-    use zipkin::*;
+    use zipkin_core::*;
 
     use super::super::*;
     use super::super::errors::Error;

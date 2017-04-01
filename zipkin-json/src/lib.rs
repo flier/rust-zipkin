@@ -4,7 +4,8 @@ extern crate serde_json;
 extern crate base64;
 extern crate bytes;
 extern crate tokio_io;
-extern crate zipkin;
+
+extern crate zipkin_core;
 
 #[cfg(test)]
 extern crate chrono;

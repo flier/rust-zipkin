@@ -7,4 +7,4 @@ authors = ["Flier Lu <flier.lu@gmail.com>"]
 error-chain = "0.10"
 hyper = "0.10"
 
-zipkin = { path = "../zipkin" }
+zipkin-core = { path = "../zipkin-core" }

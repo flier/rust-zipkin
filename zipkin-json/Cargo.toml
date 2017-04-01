@@ -10,7 +10,7 @@ base64 = "0.4"
 bytes = "0.4"
 tokio-io = "0.1"
 
-zipkin = { path = "../zipkin" }
+zipkin-core = { path = "../zipkin-core" }
 
 [dev-dependencies]
 chrono = "0.3"
