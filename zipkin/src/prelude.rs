@@ -1,1 +1,1 @@
-pub use super::{Annotatable, Span};
+pub use super::{Annotatable, Span, Collector};

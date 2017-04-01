@@ -392,7 +392,9 @@ impl<'a> Annotatable<'a> for Option<Span<'a>> {
 
 macro_rules! annotate {
     ($span:ident, $value:expr) => {
-        annotate!($span, $value, endpoint => None)
+        if $span.used() {
+            $span.annotate($value, None);
+        }
     };
     ($span:ident, $value:expr, endpoint => $endpoint:expr) => {
         if $span.used() {
@@ -400,7 +402,9 @@ macro_rules! annotate {
         }
     };
     ($span:ident, $key:expr, $value:expr) => {
-        annotate!($span, $key, $value, endpoint => None)
+        if $span.used() {
+            $span.binary_annotate($key, $value, None);
+        }
     };
     ($span:ident, $key:expr, $value:expr, endpoint => $endpoint:expr) => {
         if $span.used() {
