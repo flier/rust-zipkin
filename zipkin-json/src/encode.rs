@@ -157,6 +157,12 @@ impl<'a> ToJson for zipkin::Span<'a> {
     }
 }
 
+impl<'a, T: ToJson> ToJson for [T] {
+    fn to_json(&self) -> Value {
+        self.iter().map(|item| item.to_json()).collect::<Vec<Value>>().into()
+    }
+}
+
 pub fn to_json<T: ToJson>(value: &T) -> Value {
     value.to_json()
 }
