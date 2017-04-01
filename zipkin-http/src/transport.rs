@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use hyper::{self, Url};
 use hyper::mime::Mime;
-use hyper::client::{Client, RedirectPolicy};
+use hyper::client::{pool, Client, RedirectPolicy};
 use hyper::header::{Headers, ContentType};
 
 use zipkin;
@@ -15,6 +15,7 @@ pub struct HttpConfig {
     pub read_timeout: Option<Duration>,
     pub write_timeout: Option<Duration>,
     pub max_message_size: usize,
+    pub max_idle_connections: Option<usize>,
 }
 
 impl HttpConfig {
@@ -25,6 +26,7 @@ impl HttpConfig {
             read_timeout: Some(Duration::from_secs(15)),
             write_timeout: Some(Duration::from_secs(15)),
             max_message_size: 4096,
+            max_idle_connections: None,
         }
     }
 
@@ -56,7 +58,10 @@ impl<B: AsRef<[u8]>> zipkin::Transport<B> for HttpTransport {
     type Error = Error;
 
     fn send(&mut self, buf: &B) -> Result<Self::Output> {
-        let mut client = Client::new();
+        let mut client =
+            self.config.max_idle_connections.map_or_else(|| Client::new(), |max_idle| {
+                Client::with_pool_config(pool::Config { max_idle: max_idle })
+            });
 
         client.set_redirect_policy(self.config.redirect_policy);
         client.set_read_timeout(self.config.read_timeout);
