@@ -1,6 +1,7 @@
 use std::ptr;
 use std::mem;
 use std::rc::Rc;
+use std::ops::Deref;
 use std::cell::RefCell;
 use std::time::Duration;
 use std::io::prelude::*;
@@ -9,7 +10,7 @@ use std::net::SocketAddr;
 use byteorder::{BigEndian, WriteBytesExt};
 
 use thrift;
-use thrift::protocol::{TOutputProtocol, TBinaryOutputProtocol};
+use thrift::protocol::{TListIdentifier, TType, TOutputProtocol, TBinaryOutputProtocol};
 use thrift::transport::{TBufferTransport, TPassThruTransport};
 
 use zipkin;
@@ -33,35 +34,12 @@ impl ToI64 for Duration {
     }
 }
 
-pub trait ProtocolWriter {
-    fn write_to_protocol(&self, proto: &mut TOutputProtocol) -> thrift::Result<()>;
-}
-
-impl ProtocolWriter for core::Endpoint {
-    fn write_to_protocol(&self, proto: &mut TOutputProtocol) -> thrift::Result<()> {
-        self.write_to_out_protocol(proto)
-    }
-}
-impl ProtocolWriter for core::Annotation {
-    fn write_to_protocol(&self, proto: &mut TOutputProtocol) -> thrift::Result<()> {
-        self.write_to_out_protocol(proto)
-    }
-}
-impl ProtocolWriter for core::BinaryAnnotation {
-    fn write_to_protocol(&self, proto: &mut TOutputProtocol) -> thrift::Result<()> {
-        self.write_to_out_protocol(proto)
-    }
-}
-impl ProtocolWriter for core::Span {
-    fn write_to_protocol(&self, proto: &mut TOutputProtocol) -> thrift::Result<()> {
-        self.write_to_out_protocol(proto)
-    }
-}
-
 pub trait ToThrift {
-    type Output: ProtocolWriter;
+    type Output;
 
     fn to_thrift(&self) -> Self::Output;
+
+    fn write_to(&self, proto: &mut TOutputProtocol) -> thrift::Result<()>;
 }
 
 impl<'a> ToThrift for zipkin::Endpoint<'a> {
@@ -87,6 +65,10 @@ impl<'a> ToThrift for zipkin::Endpoint<'a> {
             port: self.addr.map(|addr| addr.port() as i16),
         }
     }
+
+    fn write_to(&self, proto: &mut TOutputProtocol) -> thrift::Result<()> {
+        self.to_thrift().write_to_out_protocol(proto)
+    }
 }
 
 impl<'a> ToThrift for zipkin::Annotation<'a> {
@@ -96,8 +78,12 @@ impl<'a> ToThrift for zipkin::Annotation<'a> {
         core::Annotation {
             timestamp: Some(self.timestamp.to_i64()),
             value: Some(self.value.into()),
-            host: self.endpoint.clone().map(|ref endpoint| endpoint.to_thrift()),
+            host: self.endpoint.to_thrift(),
         }
+    }
+
+    fn write_to(&self, proto: &mut TOutputProtocol) -> thrift::Result<()> {
+        self.to_thrift().write_to_out_protocol(proto)
     }
 }
 
@@ -138,8 +124,12 @@ impl<'a> ToThrift for zipkin::BinaryAnnotation<'a> {
             key: Some(self.key.into()),
             value: Some(value),
             annotation_type: Some(ty),
-            host: self.endpoint.clone().map(|ref endpoint| endpoint.to_thrift()),
+            host: self.endpoint.to_thrift(),
         }
+    }
+
+    fn write_to(&self, proto: &mut TOutputProtocol) -> thrift::Result<()> {
+        self.to_thrift().write_to_out_protocol(proto)
     }
 }
 
@@ -153,28 +143,54 @@ impl<'a> ToThrift for zipkin::Span<'a> {
             name: Some(self.name.into()),
             id: Some(self.id as i64),
             parent_id: self.parent_id.map(|id| id as i64),
-            annotations: if self.annotations.is_empty() {
-                None
-            } else {
-                self.annotations
-                    .iter()
-                    .map(|annotation| annotation.to_thrift())
-                    .collect::<Vec<core::Annotation>>()
-                    .into()
-            },
-            binary_annotations: if self.binary_annotations.is_empty() {
-                None
-            } else {
-                self.binary_annotations
-                    .iter()
-                    .map(|annotation| annotation.to_thrift())
-                    .collect::<Vec<core::BinaryAnnotation>>()
-                    .into()
-            },
+            annotations: self.annotations.to_thrift(),
+            binary_annotations: self.binary_annotations.to_thrift(),
             debug: self.debug,
             timestamp: Some(self.timestamp.to_i64()),
             duration: self.duration.map(|d| d.to_i64()),
         }
+    }
+
+    fn write_to(&self, proto: &mut TOutputProtocol) -> thrift::Result<()> {
+        self.to_thrift().write_to_out_protocol(proto)
+    }
+}
+
+impl<'a, T: ToThrift, D: Deref<Target = T>> ToThrift for Option<D> {
+    type Output = Option<T::Output>;
+
+    fn to_thrift(&self) -> Self::Output {
+        self.as_ref().map(|item| item.to_thrift())
+    }
+
+    fn write_to(&self, proto: &mut TOutputProtocol) -> thrift::Result<()> {
+        if let Some(ref item) = *self {
+            item.write_to(proto)
+        } else {
+            Ok(())
+        }
+    }
+}
+
+impl<'a, T: ToThrift> ToThrift for [T] {
+    type Output = Option<Vec<T::Output>>;
+
+    fn to_thrift(&self) -> Self::Output {
+        if self.is_empty() {
+            None
+        } else {
+            Some(self.iter().map(|item| item.to_thrift()).collect::<Vec<T::Output>>())
+        }
+    }
+
+    fn write_to(&self, proto: &mut TOutputProtocol) -> thrift::Result<()> {
+        proto.write_list_begin(&TListIdentifier::new(TType::Struct, self.len() as i32))?;
+
+        for item in self {
+            item.write_to(proto)?;
+        }
+
+        proto.write_list_end()
     }
 }
 
@@ -190,7 +206,7 @@ pub fn to_vec<T: ToThrift>(value: &T) -> Result<Vec<u8>> {
                                    }))),
                                    true);
 
-    value.to_thrift().write_to_protocol(&mut proto)?;
+    value.write_to(&mut proto)?;
 
     let bytes = buf.borrow_mut().write_buffer_to_vec();
 
@@ -205,7 +221,7 @@ pub fn to_writer<W: ?Sized + Write, T: ToThrift>(writer: &mut W, value: &T) -> R
                                    }))),
                                    true);
 
-    value.to_thrift().write_to_protocol(&mut proto)?;
+    value.write_to(&mut proto)?;
 
     let wrote = writer.write(buf.borrow().write_buffer_as_ref())?;
 
