@@ -1,9 +1,5 @@
 use std::time::Duration;
 
-use bytes::BytesMut;
-
-use tokio_io::codec::Encoder;
-
 use kafka::producer::{Producer, Record, Compression, RequiredAcks};
 
 use zipkin;
@@ -34,44 +30,32 @@ impl Default for KafkaConfig {
     }
 }
 
-pub struct KafkaCollector<E> {
-    encoder: E,
+pub struct KafkaTransport {
     producer: Producer,
     topic: String,
-    max_message_size: usize,
 }
 
-impl<'a, E> KafkaCollector<E>
-    where E: Encoder<Item = zipkin::Span<'a>, Error = Error>
-{
-    pub fn new(config: KafkaConfig, encoder: E) -> Result<Self> {
+impl KafkaTransport {
+    pub fn new(config: KafkaConfig) -> Result<Self> {
         let producer = Producer::from_hosts(config.hosts).with_compression(config.compression)
             .with_ack_timeout(config.ack_timeout)
             .with_connection_idle_timeout(config.connection_idle_timeout)
             .with_required_acks(config.required_acks)
             .create()?;
 
-        Ok(KafkaCollector {
-            encoder: encoder,
+        Ok(KafkaTransport {
             producer: producer,
             topic: config.topic,
-            max_message_size: config.max_message_size,
         })
     }
 }
 
-impl<'a, E> zipkin::Collector<'a> for KafkaCollector<E>
-    where E: Encoder<Item = zipkin::Span<'a>, Error = Error>
-{
+impl<B: AsRef<[u8]>> zipkin::Transport<B> for KafkaTransport {
+    type Output = ();
     type Error = Error;
 
-    fn submit(&mut self, span: zipkin::Span<'a>) -> Result<()> {
-        let key = span.name;
-        let mut buf = BytesMut::with_capacity(self.max_message_size);
-
-        self.encoder.encode(span, &mut buf)?;
-
-        let record = Record::from_key_value(&self.topic, key, &buf[..]);
+    fn send(&mut self, buf: &B) -> Result<Self::Output> {
+        let record = Record::from_key_value(&self.topic, (), buf.as_ref());
 
         self.producer.send(&record)?;
 

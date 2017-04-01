@@ -3,8 +3,8 @@ extern crate error_chain;
 extern crate rand;
 extern crate xoroshiro128;
 extern crate chrono;
-extern crate futures;
-extern crate futures_cpupool;
+extern crate bytes;
+extern crate tokio_io;
 
 pub mod prelude;
 mod constants;
@@ -19,4 +19,4 @@ pub use span::{TraceId, SpanId, Timestamp, Endpoint, Annotation, Value, BinaryAn
                Annotatable, Span};
 pub use sampler::{Sampler, FixedRate, RateLimit};
 pub use tracer::Tracer;
-pub use collector::Collector;
+pub use collector::{Transport, Collector};

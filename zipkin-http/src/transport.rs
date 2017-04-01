@@ -1,9 +1,5 @@
 use std::time::Duration;
 
-use bytes::BytesMut;
-
-use tokio_io::codec::Encoder;
-
 use hyper::{self, Url};
 use hyper::mime::Mime;
 use hyper::client::{Client, RedirectPolicy};
@@ -41,34 +37,25 @@ impl HttpConfig {
     }
 }
 
-pub struct HttpCollector<E> {
-    encoder: E,
+pub struct HttpTransport {
     base: Url,
     config: HttpConfig,
 }
 
-impl<'a, E> HttpCollector<E>
-    where E: Encoder<Item = zipkin::Span<'a>, Error = Error>
-{
-    pub fn new(encoder: E, base: Url, config: HttpConfig) -> Self {
-        HttpCollector {
-            encoder: encoder,
+impl HttpTransport {
+    pub fn new(base: Url, config: HttpConfig) -> Self {
+        HttpTransport {
             base: base,
             config: config,
         }
     }
 }
 
-impl<'a, E> zipkin::Collector<'a> for HttpCollector<E>
-    where E: Encoder<Item = zipkin::Span<'a>, Error = Error>
-{
+impl<B: AsRef<[u8]>> zipkin::Transport<B> for HttpTransport {
+    type Output = ();
     type Error = Error;
 
-    fn submit(&mut self, span: zipkin::Span<'a>) -> Result<()> {
-        let mut buf = BytesMut::with_capacity(self.config.max_message_size);
-
-        self.encoder.encode(span, &mut buf)?;
-
+    fn send(&mut self, buf: &B) -> Result<Self::Output> {
         let mut client = Client::new();
 
         client.set_redirect_policy(self.config.redirect_policy);
@@ -76,7 +63,7 @@ impl<'a, E> zipkin::Collector<'a> for HttpCollector<E>
         client.set_write_timeout(self.config.write_timeout);
 
         let res = client.post(self.base.clone())
-            .body(&buf[..])
+            .body(buf.as_ref())
             .headers(self.config.headers())
             .send()?;
 

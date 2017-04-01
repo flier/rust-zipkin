@@ -1,11 +1,9 @@
 #[macro_use]
 extern crate error_chain;
-extern crate tokio_io;
-extern crate bytes;
 extern crate hyper;
 extern crate zipkin;
 
 pub mod errors;
-mod collector;
+mod transport;
 
-pub use collector::{HttpConfig, HttpCollector};
+pub use transport::{HttpConfig, HttpTransport};

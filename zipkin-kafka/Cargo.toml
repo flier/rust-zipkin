@@ -5,10 +5,7 @@ authors = ["Flier Lu <flier.lu@gmail.com>"]
 
 [dependencies]
 error-chain = "0.10"
-futures = "0.1"
 kafka = "0.5"
-tokio-io = "0.1"
-bytes = "0.4"
 
 [dependencies.zipkin]
 path = "../zipkin"

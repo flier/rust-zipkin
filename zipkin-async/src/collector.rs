@@ -1,49 +1,66 @@
+use std::sync::{Arc, Mutex};
+
+use futures::future;
+use futures::{Future, BoxFuture};
+use futures_cpupool::CpuPool;
+
 use bytes::BytesMut;
 
 use tokio_io::codec::Encoder;
 
-use span::Span;
+use zipkin::{Span, Transport};
+
 use errors::Error;
 
-pub trait Transport<B: AsRef<[u8]>>
-    where Self: 'static + Send
-{
-    type Output: Send;
-    type Error;
-
-    fn send(&mut self, buf: &B) -> Result<Self::Output, Self::Error>;
-}
-
-pub struct Collector<E, T> {
+#[derive(Clone)]
+pub struct AsyncCollector<E, T> {
     pub max_message_size: usize,
     pub encoder: E,
-    pub transport: T,
+    pub transport: Arc<Mutex<T>>,
+    pub thread_pool: CpuPool,
 }
 
-impl<'a, E, T> Collector<E, T>
+impl<'a, E, T> AsyncCollector<E, T>
     where E: Encoder<Item = Span<'a>, Error = Error>,
           T: Transport<BytesMut, Error = Error>
 {
-    pub fn submit(&mut self, span: Span<'a>) -> Result<T::Output, Error> {
+    pub fn submit(&mut self, span: Span<'a>) -> BoxFuture<(), Error> {
         let mut buf = BytesMut::with_capacity(self.max_message_size);
 
-        self.encoder.encode(span, &mut buf)?;
+        if let Err(err) = self.encoder.encode(span, &mut buf) {
+            return future::err(err).boxed();
+        }
 
-        self.transport.send(&buf)
+        let transport = self.transport.clone();
+
+        self.thread_pool
+            .spawn_fn(move || {
+                transport.lock()?.send(&buf)?;
+
+                Ok(())
+            })
+            .boxed()
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, Mutex};
     use std::marker::PhantomData;
 
     use bytes::{BytesMut, BufMut};
 
+    use futures::Future;
+    use futures_cpupool::CpuPool;
+
     use tokio_io::codec::Encoder;
+
+    use zipkin::*;
 
     use super::super::*;
     use super::super::errors::Error;
 
+    #[derive(Clone)]
     struct MockTransport {
         sent: usize,
         buf: Vec<u8>,
@@ -70,6 +87,7 @@ mod tests {
         }
     }
 
+    #[derive(Clone)]
     struct MockEncoder<'a, T: 'a> {
         encoded: usize,
         phantom: PhantomData<&'a T>,
@@ -102,16 +120,17 @@ mod tests {
     fn submit() {
         let span = Span::new("test");
 
-        let mut collector = Collector {
+        let mut collector = AsyncCollector {
             max_message_size: 1024,
             encoder: MockEncoder::new(),
-            transport: MockTransport::new(),
+            transport: Arc::new(Mutex::new(MockTransport::new())),
+            thread_pool: CpuPool::new(1),
         };
 
-        collector.submit(span).unwrap();
+        collector.submit(span).wait().unwrap();
 
         assert_eq!(collector.encoder.encoded, 1);
-        assert_eq!(collector.transport.sent, 1);
-        assert_eq!(collector.transport.buf, b"hello world");
+        assert_eq!(collector.transport.lock().unwrap().sent, 1);
+        assert_eq!(collector.transport.lock().unwrap().buf, b"hello world");
     }
 }
