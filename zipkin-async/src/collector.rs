@@ -8,26 +8,59 @@ use bytes::BytesMut;
 
 use tokio_io::codec::Encoder;
 
-use zipkin::{Span, Transport};
+use zipkin::{Span, Transport, Collector};
 
 use errors::Error;
 
+pub trait AsyncCollector {
+    type Item;
+    type Output: Send;
+    type Error;
+    type Result: Future<Item = Self::Output, Error = Self::Error>;
+
+    fn async_submit(&mut self, item: Self::Item) -> Self::Result;
+}
+
 #[derive(Clone)]
-pub struct AsyncCollector<E, T> {
+pub struct BaseAsyncCollector<E, T> {
     pub max_message_size: usize,
     pub encoder: E,
     pub transport: Arc<Mutex<T>>,
     pub thread_pool: CpuPool,
 }
 
-impl<'a, E, T> AsyncCollector<E, T>
+impl<'a, E, T> Collector for BaseAsyncCollector<E, T>
     where E: Encoder<Item = Span<'a>, Error = Error>,
           T: Transport<BytesMut, Error = Error>
 {
-    pub fn submit(&mut self, span: Span<'a>) -> BoxFuture<(), Error> {
+    type Item = Span<'a>;
+    type Output = ();
+    type Error = Error;
+
+    fn submit(&mut self, span: Span<'a>) -> Result<Self::Output, Self::Error> {
         let mut buf = BytesMut::with_capacity(self.max_message_size);
 
-        if let Err(err) = self.encoder.encode(span, &mut buf) {
+        self.encoder.encode(span, &mut buf)?;
+
+        self.transport.lock()?.send(&buf)?;
+
+        Ok(())
+    }
+}
+
+impl<'a, E, T> AsyncCollector for BaseAsyncCollector<E, T>
+    where E: Encoder<Item = Span<'a>, Error = Error>,
+          T: Transport<BytesMut, Error = Error>
+{
+    type Item = Span<'a>;
+    type Output = ();
+    type Error = Error;
+    type Result = BoxFuture<Self::Output, Self::Error>;
+
+    fn async_submit(&mut self, item: Self::Item) -> Self::Result {
+        let mut buf = BytesMut::with_capacity(self.max_message_size);
+
+        if let Err(err) = self.encoder.encode(item, &mut buf) {
             return future::err(err).boxed();
         }
 
@@ -117,17 +150,17 @@ mod tests {
     }
 
     #[test]
-    fn submit() {
+    fn async_submit() {
         let span = Span::new("test");
 
-        let mut collector = AsyncCollector {
+        let mut collector = BaseAsyncCollector {
             max_message_size: 1024,
             encoder: MockEncoder::new(),
             transport: Arc::new(Mutex::new(MockTransport::new())),
             thread_pool: CpuPool::new(1),
         };
 
-        collector.submit(span).wait().unwrap();
+        collector.async_submit(span).wait().unwrap();
 
         assert_eq!(collector.encoder.encoded, 1);
         assert_eq!(collector.transport.lock().unwrap().sent, 1);

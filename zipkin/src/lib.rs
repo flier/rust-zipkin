@@ -19,4 +19,4 @@ pub use span::{TraceId, SpanId, Timestamp, Endpoint, Annotation, Value, BinaryAn
                Annotatable, Span};
 pub use sampler::{Sampler, FixedRate, RateLimit};
 pub use tracer::Tracer;
-pub use collector::{Transport, Collector};
+pub use collector::{Transport, Collector, BaseCollector};

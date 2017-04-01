@@ -14,22 +14,36 @@ pub trait Transport<B: AsRef<[u8]>>
     fn send(&mut self, buf: &B) -> Result<Self::Output, Self::Error>;
 }
 
-pub struct Collector<E, T> {
+pub trait Collector {
+    type Item;
+    type Output: Send;
+    type Error;
+
+    fn submit(&mut self, item: Self::Item) -> Result<Self::Output, Self::Error>;
+}
+
+pub struct BaseCollector<E, T> {
     pub max_message_size: usize,
     pub encoder: E,
     pub transport: T,
 }
 
-impl<'a, E, T> Collector<E, T>
+impl<'a, E, T> Collector for BaseCollector<E, T>
     where E: Encoder<Item = Span<'a>, Error = Error>,
           T: Transport<BytesMut, Error = Error>
 {
-    pub fn submit(&mut self, span: Span<'a>) -> Result<T::Output, Error> {
+    type Item = Span<'a>;
+    type Output = ();
+    type Error = Error;
+
+    fn submit(&mut self, span: Span<'a>) -> Result<Self::Output, Self::Error> {
         let mut buf = BytesMut::with_capacity(self.max_message_size);
 
         self.encoder.encode(span, &mut buf)?;
 
-        self.transport.send(&buf)
+        self.transport.send(&buf)?;
+
+        Ok(())
     }
 }
 
@@ -102,7 +116,7 @@ mod tests {
     fn submit() {
         let span = Span::new("test");
 
-        let mut collector = Collector {
+        let mut collector = BaseCollector {
             max_message_size: 1024,
             encoder: MockEncoder::new(),
             transport: MockTransport::new(),

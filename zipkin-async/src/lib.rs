@@ -9,4 +9,4 @@ extern crate tokio_io;
 pub mod errors;
 mod collector;
 
-pub use collector::AsyncCollector;
+pub use collector::{AsyncCollector, BaseAsyncCollector};
