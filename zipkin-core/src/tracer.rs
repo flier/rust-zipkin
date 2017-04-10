@@ -6,6 +6,9 @@ pub struct Tracer<S> {
     pub sampler: Option<S>,
 }
 
+unsafe impl<S: Sync> Sync for Tracer<S> {}
+unsafe impl<S: Send> Send for Tracer<S> {}
+
 impl<'a, S> Tracer<S> {
     pub fn new() -> Self {
         Tracer { sampler: None }
