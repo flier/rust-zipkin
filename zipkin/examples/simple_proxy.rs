@@ -6,6 +6,7 @@ extern crate pretty_env_logger;
 extern crate clap;
 #[macro_use]
 extern crate hyper;
+extern crate native_tls;
 extern crate hyper_native_tls;
 #[macro_use]
 extern crate mime;
@@ -14,6 +15,8 @@ extern crate serde_json;
 extern crate num_cpus;
 
 use std::io::prelude::*;
+use std::net::{TcpStream, Shutdown};
+use std::thread;
 
 use clap::{Arg, App};
 
@@ -23,7 +26,7 @@ use hyper::header::{Headers, ContentType, TransferEncoding, Encoding};
 use hyper::server::{Handler, Server, Request, Response};
 use hyper::client::{Body, Client, RedirectPolicy};
 use hyper::uri::RequestUri;
-use hyper::net::HttpsConnector;
+use hyper::net::{HttpStream, HttpsConnector};
 use hyper_native_tls::NativeTlsClient;
 
 const APP_NAME: &'static str = "simple_proxy";
@@ -38,8 +41,13 @@ header! { (XForwardedProto, "X-Forwarded-Proto") => [String] }
 
 error_chain!{
     foreign_links {
+        IoError(::std::io::Error);
         EnvVarError(::std::env::VarError);
         ParseIntError(::std::num::ParseIntError);
+        JsonError(::serde_json::Error);
+        HyperError(::hyper::Error);
+        TlsError(::native_tls::Error);
+        TlsServerError(::hyper_native_tls::ServerError);
     }
 }
 
@@ -83,31 +91,31 @@ struct SimpleProxy {
 
 impl Handler for SimpleProxy {
     fn handle(&self, req: Request, mut res: Response) {
-        info!("request from {}: {} {} {}",
-              req.version,
-              req.remote_addr,
-              req.method,
-              req.uri);
+        debug!("request from {}: {} {} {}",
+               req.version,
+               req.remote_addr,
+               req.method,
+               req.uri);
         debug!("received headers:\n{}", req.headers);
 
-        if req.headers.has::<ProxyConnection>() {
-            self.request_proxy(req, res);
-        } else {
-            let method = req.method.clone();
-
-            match method {
-                Method::Get | Method::Post => self.serve_http_request(req, res),
-                Method::Extension(ref method) if method == "CONNECT" => {
-                    self.connect_proxy(req, res)
+        match req.method {
+            Method::Get | Method::Post => {
+                if req.headers.has::<ProxyConnection>() {
+                    self.request_proxy(req, res).unwrap();
+                } else {
+                    self.serve_http_request(req, res).unwrap()
                 }
-                _ => *res.status_mut() = StatusCode::MethodNotAllowed,
             }
+
+            Method::Connect => self.connection_proxy(req, res).unwrap(),
+
+            _ => *res.status_mut() = StatusCode::MethodNotAllowed,
         }
     }
 }
 
 impl SimpleProxy {
-    fn serve_http_request(&self, req: Request, mut res: Response) {
+    fn serve_http_request(&self, req: Request, mut res: Response) -> Result<()> {
         info!("serve HTTP request");
 
         let mut headers = serde_json::Map::new();
@@ -126,12 +134,14 @@ impl SimpleProxy {
 
         res.headers_mut().set(ContentType(mime!(Application / Json)));
 
-        let mut stream = res.start().unwrap();
-        serde_json::to_writer_pretty(&mut stream, &out).unwrap();
-        stream.end().unwrap();
+        let mut stream = res.start()?;
+        serde_json::to_writer_pretty(&mut stream, &out)?;
+        stream.end()?;
+
+        Ok(())
     }
 
-    fn request_proxy(&self, mut req: Request, mut res: Response) {
+    fn request_proxy(&self, mut req: Request, mut res: Response) -> Result<()> {
         info!("serve HTTP request proxy");
 
         let mut headers = Headers::new();
@@ -151,14 +161,14 @@ impl SimpleProxy {
 
         let mut buf = vec![];
 
-        req.read_to_end(&mut buf).unwrap();
+        req.read_to_end(&mut buf)?;
 
         info!("sending request with {} bytes body to upstream: {} {}", buf.len(), req.method, req.uri);
         debug!("sending headers:\n{}", headers);
 
         let mut client = match req.uri {
             RequestUri::AbsoluteUri(ref url) if url.scheme() == "https" => {
-                let ssl = NativeTlsClient::new().unwrap();
+                let ssl = NativeTlsClient::new()?;
                 let connector = HttpsConnector::new(ssl);
                 Client::with_connector(connector)
             }
@@ -171,11 +181,11 @@ impl SimpleProxy {
             .headers(headers)
             .body(Body::BufBody(&buf, buf.len()));
 
-        let mut cres = creq.send().unwrap();
+        let mut cres = creq.send()?;
 
         let mut buf = vec![];
 
-        cres.read_to_end(&mut buf).unwrap();
+        cres.read_to_end(&mut buf)?;
 
         info!("received response with {} bytes body from upstream: {} {}", buf.len(), cres.version, cres.status);
         debug!("received headers:\n{}", cres.headers);
@@ -189,16 +199,109 @@ impl SimpleProxy {
 
         match cres.headers.get::<TransferEncoding>() {
             Some(ref encodings) if encodings.contains(&Encoding::Chunked) => {
-                let mut res = res.start().unwrap();
-                res.write_all(&buf).unwrap();
-                res.end().unwrap();
+                let mut res = res.start()?;
+                res.write_all(&buf)?;
+                res.end()?;
             }
-            _ => res.send(&buf).unwrap(),
+            _ => res.send(&buf)?,
+        }
+
+        Ok(())
+    }
+
+    fn connection_proxy(&self, mut req: Request, mut res: Response) -> Result<()> {
+        info!("serve HTTP connection proxy");
+
+        let stream = if let RequestUri::Authority(ref addr) = req.uri {
+            Some(TcpStream::connect(addr)?)
+        } else {
+            None
+        };
+
+        *res.status_mut() = stream.as_ref().map_or(StatusCode::BadRequest, |_| StatusCode::Ok);
+        res.headers_mut().set(ProxyAgent(format!("{}/{}", APP_NAME, APP_VERSION)));
+        res.send(b"")?;
+
+        if let Some(upstream) = stream {
+            if let Some(&HttpStream(ref client)) = req.downcast_ref::<HttpStream>() {
+                Pipe::new(client.try_clone()?, upstream).run()?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
+struct Pipe {
+    client: TcpStream,
+    upstream: TcpStream,
+}
+
+impl Pipe {
+    fn new(client: TcpStream, upstream: TcpStream) -> Pipe {
+        Pipe {
+            client: client,
+            upstream: upstream,
         }
     }
 
-    fn connect_proxy(&self, mut req: Request, mut res: Response) {
-        info!("serve HTTP connection proxy");
+    fn run(&self) -> Result<()> {
+        self.upstream.set_nodelay(true)?;
+        self.client.set_nodelay(true)?;
+
+        let upstream = self.upstream.try_clone()?;
+        let client = self.client.try_clone()?;
+
+        let h1 = thread::spawn(move || { Self::copy(upstream, client).unwrap(); });
+
+        let upstream = self.upstream.try_clone()?;
+        let client = self.client.try_clone()?;
+
+        let h2 = thread::spawn(move || { Self::copy(client, upstream).unwrap(); });
+
+        h1.join().unwrap();
+        h2.join().unwrap();
+
+        Ok(())
+    }
+
+    fn copy(mut from: TcpStream, mut to: TcpStream) -> Result<()> {
+        let mut buf = [0; 4096];
+
+        loop {
+            match from.read(&mut buf) {
+                Ok(0) => {
+                    debug!("shutdow writing to {}", to.peer_addr()?);
+
+                    to.shutdown(Shutdown::Write)?;
+
+                    break;
+                }
+
+                Ok(read) => {
+                    debug!("received {} bytes from {}", read, from.peer_addr()?);
+
+                    match to.write(&buf[..read]) {
+                        Ok(wrote) => {
+                            debug!("sent {} bytes to {}", wrote, to.peer_addr()?);
+                        }
+                        Err(err) => {
+                            warn!("fail to send to {}, {}", to.peer_addr()?, err);
+
+                            bail!(err);
+                        }
+                    }
+                }
+
+                Err(err) => {
+                    warn!("fail to receive from {}, {}", from.peer_addr()?, err);
+
+                    bail!(err);
+                }
+            }
+        }
+
+        Ok(())
     }
 }
 
