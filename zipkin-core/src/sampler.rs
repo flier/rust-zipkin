@@ -1,12 +1,13 @@
 use std::cmp;
 use std::marker::PhantomData;
 use std::time::{Duration, Instant};
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, AtomicIsize, Ordering};
 
-pub trait Sampler {
+pub trait Sampler: Send + Sync {
     type Item;
 
-    fn sample(&mut self, item: &Self::Item) -> bool;
+    fn sample(&self, item: &Self::Item) -> bool;
 }
 
 /// Fixed rate sampling
@@ -17,6 +18,7 @@ pub struct FixedRate<T> {
     phantom: PhantomData<T>,
 }
 
+unsafe impl<T> Send for FixedRate<T> {}
 unsafe impl<T> Sync for FixedRate<T> {}
 
 impl<T> FixedRate<T> {
@@ -38,7 +40,7 @@ impl<T> Default for FixedRate<T> {
 impl<T> Sampler for FixedRate<T> {
     type Item = T;
 
-    fn sample(&mut self, _: &Self::Item) -> bool {
+    fn sample(&self, _: &Self::Item) -> bool {
         self.total_items.fetch_add(1, Ordering::Relaxed) % self.sample_rate == 0
     }
 }
@@ -50,10 +52,11 @@ pub struct RateLimit<T> {
     pub capacity: usize,
     pub interval: Duration,
     tokens: AtomicIsize,
-    ts: Instant,
+    ts: Mutex<Instant>,
     phantom: PhantomData<T>,
 }
 
+unsafe impl<T> Send for RateLimit<T> {}
 unsafe impl<T> Sync for RateLimit<T> {}
 
 impl<T> RateLimit<T> {
@@ -63,7 +66,7 @@ impl<T> RateLimit<T> {
             capacity: cmp::max(quantum, capacity),
             interval: interval,
             tokens: AtomicIsize::new(quantum as isize),
-            ts: Instant::now(),
+            ts: Mutex::new(Instant::now()),
             phantom: PhantomData,
         }
     }
@@ -80,13 +83,15 @@ impl<T> RateLimit<T> {
 impl<T> Sampler for RateLimit<T> {
     type Item = T;
 
-    fn sample(&mut self, _: &Self::Item) -> bool {
+    fn sample(&self, _: &Self::Item) -> bool {
         let remaining = self.tokens.fetch_sub(1, Ordering::Relaxed) - 1;
 
         if remaining >= 0 {
             true
         } else {
-            let elapsed = self.ts.elapsed();
+            let elapsed = {
+                self.ts.lock().unwrap().elapsed()
+            };
 
             if elapsed < self.interval {
                 false
@@ -98,8 +103,10 @@ impl<T> Sampler for RateLimit<T> {
                               self.interval.subsec_nanos() as u64 / 1000),
                              self.capacity as u64) as isize - 1;
 
-                if self.tokens.compare_and_swap(remaining, tokens, Ordering::Relaxed) == remaining {
-                    self.ts = Instant::now();
+                if self.tokens
+                       .compare_and_swap(remaining, tokens, Ordering::Relaxed) ==
+                   remaining {
+                    *self.ts.lock().unwrap() = Instant::now();
 
                     true
                 } else {
@@ -119,7 +126,7 @@ mod tests {
 
     #[test]
     fn fixed_rate() {
-        let mut sampler = FixedRate::new(3);
+        let sampler = FixedRate::new(3);
 
         assert!(sampler.sample(&1));
         assert!(!sampler.sample(&2));
@@ -127,18 +134,18 @@ mod tests {
         assert!(sampler.sample(&4));
 
         thread::spawn(move || {
-                assert!(!sampler.sample(&5));
-                assert!(!sampler.sample(&6));
-                assert!(sampler.sample(&7));
-                assert!(!sampler.sample(&8));
-            })
-            .join()
-            .unwrap();
+                          assert!(!sampler.sample(&5));
+                          assert!(!sampler.sample(&6));
+                          assert!(sampler.sample(&7));
+                          assert!(!sampler.sample(&8));
+                      })
+                .join()
+                .unwrap();
     }
 
     #[test]
     fn rate_limit() {
-        let mut sampler = RateLimit::new(1, 2, Duration::from_millis(100));
+        let sampler = RateLimit::new(1, 2, Duration::from_millis(100));
 
         assert!(sampler.sample(&1));
         assert!(!sampler.sample(&2));
