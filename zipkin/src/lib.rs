@@ -5,6 +5,10 @@ pub use zipkin_core::{TraceId, SpanId, Timestamp, Endpoint, Annotation, Value, B
                       Annotatable, Span, Sampler, FixedRate, RateLimit, Tracer, Transport,
                       Collector, BaseCollector};
 
+pub mod prelude {
+    pub use zipkin_core::{Annotatable, BinaryAnnotationValue};
+}
+
 // hack for #[macro_reexport] feature
 //
 // https://github.com/rust-lang/rust/issues/29638
