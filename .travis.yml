@@ -10,6 +10,12 @@ matrix:
 os:
   - linux
   - osx
+addons:
+  apt:
+    sources:
+    - kubuntu-backports
+    packages:
+    - cmake
 env:
   global:
     - RUST_BACKTRACE=1
