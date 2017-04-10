@@ -104,7 +104,7 @@ impl<'a> ToJson for BinaryAnnotation<'a> {
             zipkin::Value::I32(v) => (v.into(), Some("I32")),
             zipkin::Value::I64(v) => (v.into(), Some("I64")),
             zipkin::Value::Double(v) => (v.into(), Some("DOUBLE")),
-            zipkin::Value::String(v) => (v.into(), None),
+            zipkin::Value::Str(v) => (v.into(), None),
         };
 
         attrs.insert("value".into(), value);
@@ -160,7 +160,10 @@ impl<'a> ToJson for Span<'a> {
 
 impl<'a, T: ToJson> ToJson for [T] {
     fn to_json(&self) -> Value {
-        self.iter().map(|item| item.to_json()).collect::<Vec<Value>>().into()
+        self.iter()
+            .map(|item| item.to_json())
+            .collect::<Vec<Value>>()
+            .into()
     }
 }
 
@@ -208,16 +211,18 @@ mod tests {
     fn to_json() {
         let mut span = Span::new("test")
             .with_trace_id(TraceId {
-                lo: 123,
-                hi: Some(456),
-            })
+                               lo: 123,
+                               hi: Some(456),
+                           })
             .with_id(123)
             .with_parent_id(456)
             .with_debug(true);
-        let endpoint = Some(Arc::new(Endpoint {
-            name: Some("test"),
-            addr: Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080)),
-        }));
+        let endpoint =
+            Some(Arc::new(Endpoint {
+                              name: Some("test"),
+                              addr: Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+                                                         8080)),
+                          }));
 
         span.annotate(CLIENT_SEND, endpoint.clone());
         span.annotate(CLIENT_RECV, None);
@@ -237,13 +242,13 @@ mod tests {
         let json = to_string_pretty(&span).unwrap();
         let diffs: Vec<String> = diff::lines(&json,
                                              unsafe { str::from_utf8_unchecked(PRETTY_JSON) })
-            .iter()
-            .flat_map(|ref line| match **line {
-                diff::Result::Both(..) => None,
-                diff::Result::Left(s) => Some(format!("-{}", s)),
-                diff::Result::Right(s) => Some(format!("+{}", s)),
-            })
-            .collect();
+                .iter()
+                .flat_map(|ref line| match **line {
+                              diff::Result::Both(..) => None,
+                              diff::Result::Left(s) => Some(format!("-{}", s)),
+                              diff::Result::Right(s) => Some(format!("+{}", s)),
+                          })
+                .collect();
 
         assert_eq!(diffs, Vec::<String>::new());
     }

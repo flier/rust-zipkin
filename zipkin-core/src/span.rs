@@ -95,7 +95,7 @@ pub enum Value<'a> {
     I32(i32),
     I64(i64),
     Double(f64),
-    String(&'a str),
+    Str(&'a str),
 }
 
 impl<'a> Value<'a> {
@@ -172,7 +172,7 @@ impl<'a> Value<'a> {
     }
 
     pub fn as_str(&self) -> Option<&'a str> {
-        if let &Value::String(v) = self {
+        if let &Value::Str(v) = self {
             Some(v)
         } else {
             None
@@ -236,7 +236,7 @@ impl<'a> From<f32> for Value<'a> {
 
 impl<'a> From<&'a str> for Value<'a> {
     fn from(v: &'a str) -> Self {
-        Value::String(v)
+        Value::Str(v)
     }
 }
 
@@ -321,7 +321,10 @@ impl<'a> Span<'a> {
     }
 
     pub fn with_trace_id(self, trace_id: TraceId) -> Self {
-        Span { trace_id: trace_id, ..self }
+        Span {
+            trace_id: trace_id,
+            ..self
+        }
     }
 
     pub fn with_id(self, id: SpanId) -> Self {
@@ -329,15 +332,24 @@ impl<'a> Span<'a> {
     }
 
     pub fn with_parent_id(self, parent_id: SpanId) -> Self {
-        Span { parent_id: Some(parent_id), ..self }
+        Span {
+            parent_id: Some(parent_id),
+            ..self
+        }
     }
 
     pub fn with_debug(self, debug: bool) -> Self {
-        Span { debug: Some(debug), ..self }
+        Span {
+            debug: Some(debug),
+            ..self
+        }
     }
 
     pub fn with_sampled(self, sampled: bool) -> Self {
-        Span { sampled: Some(sampled), ..self }
+        Span {
+            sampled: Some(sampled),
+            ..self
+        }
     }
 }
 
@@ -362,7 +374,8 @@ impl<'a> Annotatable<'a> for Span<'a> {
     fn binary_annotate<V>(&mut self, key: &'a str, value: V, endpoint: Option<Arc<Endpoint<'a>>>)
         where V: Sized + BinaryAnnotationValue<'a>
     {
-        self.binary_annotations.push(BinaryAnnotation::new(key, value, endpoint))
+        self.binary_annotations
+            .push(BinaryAnnotation::new(key, value, endpoint))
     }
 }
 
@@ -438,9 +451,9 @@ mod tests {
     fn annonation() {
         let mut span = Span::new("test");
         let endpoint = Some(Arc::new(Endpoint {
-            name: Some("test"),
-            addr: None,
-        }));
+                                         name: Some("test"),
+                                         addr: None,
+                                     }));
 
         span.annotate(CLIENT_SEND, endpoint.clone());
         {
@@ -467,7 +480,7 @@ mod tests {
 
             assert_eq!(span.binary_annotations.len(), 1);
             assert_eq!(annonation.key, HTTP_METHOD);
-            assert_eq!(annonation.value, Value::String("GET"));
+            assert_eq!(annonation.value, Value::Str("GET"));
         }
         span.binary_annotate("debug", true, None);
         {
@@ -516,7 +529,7 @@ mod tests {
 
             assert_eq!(span.binary_annotations.len(), 7);
             assert_eq!(annonation.key, ERROR);
-            assert_eq!(annonation.value, Value::String("some error"));
+            assert_eq!(annonation.value, Value::Str("some error"));
         }
         span.binary_annotate("raw", &b"some\0raw\0data"[..], None);
         {
@@ -559,9 +572,9 @@ mod tests {
     fn macros() {
         let mut span = Span::new("test");
         let endpoint = Some(Arc::new(Endpoint {
-            name: Some("test"),
-            addr: None,
-        }));
+                                         name: Some("test"),
+                                         addr: None,
+                                     }));
 
         annotate!(span, CLIENT_SEND);
         {
@@ -586,7 +599,7 @@ mod tests {
 
             assert_eq!(span.binary_annotations.len(), 1);
             assert_eq!(annonation.key, HTTP_METHOD);
-            assert_eq!(annonation.value, Value::String("GET"));
+            assert_eq!(annonation.value, Value::Str("GET"));
         }
 
         annotate!(span, HTTP_STATUS_CODE, 123i16, endpoint => endpoint.clone());
@@ -618,8 +631,8 @@ mod tests {
         annotate!(span, CLIENT_RECV_FRAGMENT);
         {
             assert_eq!(span.map(|span| {
-                               (span.annotations.len(), span.annotations.last().unwrap().value)
-                           })
+                                    (span.annotations.len(), span.annotations.last().unwrap().value)
+                                })
                            .unwrap(),
                        (3, CLIENT_RECV_FRAGMENT));
         }

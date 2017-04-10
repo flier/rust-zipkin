@@ -117,7 +117,7 @@ impl<'a> ToThrift for zipkin::BinaryAnnotation<'a> {
 
                 (buf, core::AnnotationType::DOUBLE)
             }
-            zipkin::Value::String(v) => (v.as_bytes().into(), core::AnnotationType::STRING),
+            zipkin::Value::Str(v) => (v.as_bytes().into(), core::AnnotationType::STRING),
         };
 
         core::BinaryAnnotation {
@@ -179,12 +179,15 @@ impl<'a, T: ToThrift> ToThrift for [T] {
         if self.is_empty() {
             None
         } else {
-            Some(self.iter().map(|item| item.to_thrift()).collect::<Vec<T::Output>>())
+            Some(self.iter()
+                     .map(|item| item.to_thrift())
+                     .collect::<Vec<T::Output>>())
         }
     }
 
     fn write_to(&self, proto: &mut TOutputProtocol) -> thrift::Result<()> {
-        proto.write_list_begin(&TListIdentifier::new(TType::Struct, self.len() as i32))?;
+        proto
+            .write_list_begin(&TListIdentifier::new(TType::Struct, self.len() as i32))?;
 
         for item in self {
             item.write_to(proto)?;
@@ -202,8 +205,8 @@ pub fn to_vec<T: ToThrift>(value: &T) -> Result<Vec<u8>> {
     let buf = Rc::new(RefCell::new(Box::new(TBufferTransport::with_capacity(0, 4096))));
     let mut proto =
         TBinaryOutputProtocol::new(Rc::new(RefCell::new(Box::new(TPassThruTransport {
-                                       inner: buf.clone(),
-                                   }))),
+                                                                     inner: buf.clone(),
+                                                                 }))),
                                    true);
 
     value.write_to(&mut proto)?;
@@ -217,8 +220,8 @@ pub fn to_writer<W: ?Sized + Write, T: ToThrift>(writer: &mut W, value: &T) -> R
     let buf = Rc::new(RefCell::new(Box::new(TBufferTransport::with_capacity(0, 4096))));
     let mut proto =
         TBinaryOutputProtocol::new(Rc::new(RefCell::new(Box::new(TPassThruTransport {
-                                       inner: buf.clone(),
-                                   }))),
+                                                                     inner: buf.clone(),
+                                                                 }))),
                                    true);
 
     value.write_to(&mut proto)?;
@@ -244,16 +247,18 @@ mod tests {
     fn to_thrift() {
         let mut span = Span::new("test")
             .with_trace_id(TraceId {
-                lo: 123,
-                hi: Some(456),
-            })
+                               lo: 123,
+                               hi: Some(456),
+                           })
             .with_id(123)
             .with_parent_id(456)
             .with_debug(true);
-        let endpoint = Some(Arc::new(Endpoint {
-            name: Some("test"),
-            addr: Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080)),
-        }));
+        let endpoint =
+            Some(Arc::new(Endpoint {
+                              name: Some("test"),
+                              addr: Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+                                                         8080)),
+                          }));
 
         span.annotate(CLIENT_SEND, endpoint.clone());
         span.annotate(CLIENT_RECV, None);

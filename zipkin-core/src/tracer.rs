@@ -19,11 +19,16 @@ impl<'a, S> Tracer<S>
         Tracer { sampler: Some(sampler) }
     }
 
-    pub fn span(&mut self, name: &'a str) -> Span<'a> {
+    pub fn span(&self, name: &'a str) -> Span<'a> {
         let span = Span::new(name);
-        let sampled = self.sampler.as_mut().map(|ref mut sampler| sampler.sample(&span));
+        let sampled = self.sampler
+            .as_ref()
+            .map(|sampler| sampler.sample(&span));
 
-        Span { sampled: sampled, ..span }
+        Span {
+            sampled: sampled,
+            ..span
+        }
     }
 }
 
