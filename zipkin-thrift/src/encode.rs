@@ -118,6 +118,7 @@ impl<'a> ToThrift for zipkin::BinaryAnnotation<'a> {
                 (buf, core::AnnotationType::DOUBLE)
             }
             zipkin::Value::Str(v) => (v.as_bytes().into(), core::AnnotationType::STRING),
+            zipkin::Value::String(ref v) => (v.as_bytes().into(), core::AnnotationType::STRING),
         };
 
         core::BinaryAnnotation {

@@ -96,6 +96,7 @@ pub enum Value<'a> {
     I64(i64),
     Double(f64),
     Str(&'a str),
+    String(String),
 }
 
 impl<'a> Value<'a> {
@@ -171,11 +172,11 @@ impl<'a> Value<'a> {
         }
     }
 
-    pub fn as_str(&self) -> Option<&'a str> {
-        if let &Value::Str(v) = self {
-            Some(v)
-        } else {
-            None
+    pub fn as_str(&'a self) -> Option<&'a str> {
+        match self {
+            &Value::Str(v) => Some(v),
+            &Value::String(ref v) => Some(v.as_str()),
+            _ => None,
         }
     }
 }
@@ -237,6 +238,12 @@ impl<'a> From<f32> for Value<'a> {
 impl<'a> From<&'a str> for Value<'a> {
     fn from(v: &'a str) -> Self {
         Value::Str(v)
+    }
+}
+
+impl<'a> From<String> for Value<'a> {
+    fn from(v: String) -> Self {
+        Value::String(v)
     }
 }
 

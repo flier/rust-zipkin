@@ -105,6 +105,7 @@ impl<'a> ToJson for BinaryAnnotation<'a> {
             zipkin::Value::I64(v) => (v.into(), Some("I64")),
             zipkin::Value::Double(v) => (v.into(), Some("DOUBLE")),
             zipkin::Value::Str(v) => (v.into(), None),
+            zipkin::Value::String(ref v) => (v.clone().into(), None),
         };
 
         attrs.insert("value".into(), value);
