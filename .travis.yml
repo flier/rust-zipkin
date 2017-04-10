@@ -15,7 +15,7 @@ env:
     - RUST_BACKTRACE=1
     - RUST_LOG=zipkin
 install:
-  - cargo install cargo-tree
+  - cargo install cargo-tree --force
 script:
   - cargo test --all
   - cd zipkin && cargo run --example simple_proxy -- -h
