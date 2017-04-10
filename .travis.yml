@@ -1,0 +1,25 @@
+sudo: false
+language: rust
+rust:
+  - stable
+  - beta
+  - nightly
+matrix:
+  allow_failures:
+    - rust: nightly
+os:
+  - linux
+  - osx
+after_failure:
+  - tree -h
+env:
+  global:
+    - RUST_BACKTRACE=1
+    - RUST_LOG=zipkin
+script:
+  - cargo test --all
+  - cd zipkin && cargo run --example simple_proxy -- -h
+cache:
+  cargo: true
+  directories:
+    - $HOME/.cargo
