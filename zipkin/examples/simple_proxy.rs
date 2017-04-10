@@ -13,6 +13,8 @@ extern crate mime;
 #[macro_use]
 extern crate serde_json;
 extern crate num_cpus;
+#[macro_use]
+extern crate zipkin;
 
 use std::io::prelude::*;
 use std::net::{TcpStream, Shutdown};
@@ -28,6 +30,8 @@ use hyper::client::{Body, Client, RedirectPolicy};
 use hyper::uri::RequestUri;
 use hyper::net::{HttpStream, HttpsConnector};
 use hyper_native_tls::NativeTlsClient;
+
+use zipkin::prelude::*;
 
 const APP_NAME: &'static str = "simple_proxy";
 const APP_VERSION: &'static str = "0.1.0";
@@ -51,45 +55,17 @@ error_chain!{
     }
 }
 
-struct Config {
-    addr: String,
-    threads: usize,
-}
-
-fn parse_cmd_line() -> Result<Config> {
-    let default_threads = num_cpus::get().to_string();
-
-    let opts = App::new(APP_NAME)
-        .version(APP_VERSION)
-        .author("Flier Lu <flier.lu@gmail.com>")
-        .arg(Arg::with_name("listen")
-            .short("l")
-            .long("listen")
-            .help("Start listening to an address over HTTP.")
-            .value_name("HOST[:PORT]")
-            .takes_value(true)
-            .default_value("127.0.0.1:8080"))
-        .arg(Arg::with_name("threads")
-            .short("t")
-            .long("threads")
-            .help("Number of multiple threads to handle requests")
-            .value_name("NUM")
-            .takes_value(true)
-            .default_value(&default_threads))
-        .get_matches();
-
-    Ok(Config {
-        addr: opts.value_of("listen").unwrap().to_owned(),
-        threads: opts.value_of("threads").unwrap().parse()?,
-    })
-}
-
-struct SimpleProxy {
+struct SimpleProxy<'a, S>
+    where S: zipkin::Sampler<Item = zipkin::Span<'a>>
+{
     addr: String,
     proto: String,
+    tracer: zipkin::Tracer<S>,
 }
 
-impl Handler for SimpleProxy {
+impl<'a, S> Handler for SimpleProxy<'a, S>
+    where S: zipkin::Sampler<Item = zipkin::Span<'a>>
+{
     fn handle(&self, req: Request, mut res: Response) {
         debug!("request from {}: {} {} {}",
                req.version,
@@ -98,24 +74,37 @@ impl Handler for SimpleProxy {
                req.uri);
         debug!("received headers:\n{}", req.headers);
 
+        let mut span = self.tracer.span("request");
+
+        annotate!(span, zipkin::SERVER_RECV);
+        annotate!(span, zipkin::CLIENT_ADDR, req.remote_addr.to_string());
+        annotate!(span, zipkin::HTTP_METHOD, req.method.to_string());
+        annotate!(span, zipkin::HTTP_URL, req.uri.to_string());
+
         match req.method {
             Method::Get | Method::Post => {
                 if req.headers.has::<ProxyConnection>() {
-                    self.request_proxy(req, res).unwrap();
+                    self.request_proxy(req, res, span).unwrap();
                 } else {
-                    self.serve_http_request(req, res).unwrap()
+                    self.serve_http_request(req, res, span).unwrap()
                 }
             }
 
-            Method::Connect => self.connection_proxy(req, res).unwrap(),
+            Method::Connect => self.connection_proxy(req, res, span).unwrap(),
 
             _ => *res.status_mut() = StatusCode::MethodNotAllowed,
         }
     }
 }
 
-impl SimpleProxy {
-    fn serve_http_request(&self, req: Request, mut res: Response) -> Result<()> {
+impl<'a, S> SimpleProxy<'a, S>
+    where S: zipkin::Sampler<Item = zipkin::Span<'a>>
+{
+    fn serve_http_request(&self,
+                          req: Request,
+                          mut res: Response,
+                          mut span: zipkin::Span<'a>)
+                          -> Result<()> {
         info!("serve HTTP request");
 
         let mut headers = serde_json::Map::new();
@@ -132,16 +121,25 @@ impl SimpleProxy {
             "headers": serde_json::Value::Object(headers),
         });
 
-        res.headers_mut().set(ContentType(mime!(Application / Json)));
+        res.headers_mut()
+            .set(ContentType(mime!(Application / Json)));
 
         let mut stream = res.start()?;
         serde_json::to_writer_pretty(&mut stream, &out)?;
         stream.end()?;
 
+        annotate!(span, zipkin::SERVER_SEND);
+
+        self.tracer.submit(span);
+
         Ok(())
     }
 
-    fn request_proxy(&self, mut req: Request, mut res: Response) -> Result<()> {
+    fn request_proxy(&self,
+                     mut req: Request,
+                     mut res: Response,
+                     mut span: zipkin::Span<'a>)
+                     -> Result<()> {
         info!("serve HTTP request proxy");
 
         let mut headers = Headers::new();
@@ -163,6 +161,8 @@ impl SimpleProxy {
 
         req.read_to_end(&mut buf)?;
 
+        annotate!(span, zipkin::HTTP_REQUEST_SIZE, buf.len());
+
         info!("sending request with {} bytes body to upstream: {} {}", buf.len(), req.method, req.uri);
         debug!("sending headers:\n{}", headers);
 
@@ -177,9 +177,17 @@ impl SimpleProxy {
 
         client.set_redirect_policy(RedirectPolicy::FollowNone);
 
-        let creq = client.request(req.method.clone(), &req.uri.to_string())
+        let creq = client
+            .request(req.method.clone(), &req.uri.to_string())
             .headers(headers)
             .body(Body::BufBody(&buf, buf.len()));
+
+        let mut upstream_span = span.child("request-proxy");
+
+        annotate!(upstream_span, zipkin::CLIENT_SEND);
+        annotate!(upstream_span, zipkin::HTTP_METHOD, req.method.to_string());
+        annotate!(upstream_span, zipkin::HTTP_URL, req.uri.to_string());
+        annotate!(upstream_span, zipkin::HTTP_REQUEST_SIZE, buf.len());
 
         let mut cres = creq.send()?;
 
@@ -187,14 +195,21 @@ impl SimpleProxy {
 
         cres.read_to_end(&mut buf)?;
 
+        annotate!(upstream_span, zipkin::HTTP_STATUS_CODE, cres.status.to_u16());
+        annotate!(upstream_span, zipkin::HTTP_RESPONSE_SIZE, buf.len());
+        annotate!(upstream_span, zipkin::CLIENT_RECV);
+
+        self.tracer.submit(upstream_span);
+
         info!("received response with {} bytes body from upstream: {} {}", buf.len(), cres.version, cres.status);
         debug!("received headers:\n{}", cres.headers);
 
         *res.status_mut() = cres.status;
 
         for header in cres.headers.iter() {
-            res.headers_mut().append_raw(header.name().to_owned(),
-                                         header.value_string().as_bytes().to_owned());
+            res.headers_mut()
+                .append_raw(header.name().to_owned(),
+                            header.value_string().as_bytes().to_owned());
         }
 
         match cres.headers.get::<TransferEncoding>() {
@@ -206,10 +221,18 @@ impl SimpleProxy {
             _ => res.send(&buf)?,
         }
 
+        annotate!(span, zipkin::SERVER_SEND);
+
+        self.tracer.submit(span);
+
         Ok(())
     }
 
-    fn connection_proxy(&self, mut req: Request, mut res: Response) -> Result<()> {
+    fn connection_proxy(&self,
+                        req: Request,
+                        mut res: Response,
+                        mut span: zipkin::Span<'a>)
+                        -> Result<()> {
         info!("serve HTTP connection proxy");
 
         let stream = if let RequestUri::Authority(ref addr) = req.uri {
@@ -218,15 +241,25 @@ impl SimpleProxy {
             None
         };
 
-        *res.status_mut() = stream.as_ref().map_or(StatusCode::BadRequest, |_| StatusCode::Ok);
-        res.headers_mut().set(ProxyAgent(format!("{}/{}", APP_NAME, APP_VERSION)));
+        *res.status_mut() = stream
+            .as_ref()
+            .map_or(StatusCode::BadRequest, |_| StatusCode::Ok);
+
+        annotate!(span, zipkin::HTTP_STATUS_CODE, res.status().to_u16());
+
+        res.headers_mut()
+            .set(ProxyAgent(format!("{}/{}", APP_NAME, APP_VERSION)));
         res.send(b"")?;
+
+        annotate!(span, zipkin::SERVER_SEND);
 
         if let Some(upstream) = stream {
             if let Some(&HttpStream(ref client)) = req.downcast_ref::<HttpStream>() {
                 Pipe::new(client.try_clone()?, upstream).run()?;
             }
         }
+
+        self.tracer.submit(span);
 
         Ok(())
     }
@@ -245,27 +278,24 @@ impl Pipe {
         }
     }
 
-    fn run(&self) -> Result<()> {
+    fn run<'a>(&mut self) -> Result<()> {
         self.upstream.set_nodelay(true)?;
         self.client.set_nodelay(true)?;
 
         let upstream = self.upstream.try_clone()?;
         let client = self.client.try_clone()?;
 
-        let h1 = thread::spawn(move || { Self::copy(upstream, client).unwrap(); });
+        thread::spawn(move || { Self::copy(upstream, client).unwrap(); });
 
         let upstream = self.upstream.try_clone()?;
         let client = self.client.try_clone()?;
 
-        let h2 = thread::spawn(move || { Self::copy(client, upstream).unwrap(); });
-
-        h1.join().unwrap();
-        h2.join().unwrap();
+        thread::spawn(move || { Self::copy(client, upstream).unwrap(); });
 
         Ok(())
     }
 
-    fn copy(mut from: TcpStream, mut to: TcpStream) -> Result<()> {
+    fn copy<'a>(mut from: TcpStream, mut to: TcpStream) -> Result<()> {
         let mut buf = [0; 4096];
 
         loop {
@@ -305,6 +335,49 @@ impl Pipe {
     }
 }
 
+struct Config {
+    addr: String,
+    threads: usize,
+    sample_rate: usize,
+}
+
+fn parse_cmd_line() -> Result<Config> {
+    let default_threads = num_cpus::get().to_string();
+    let default_sample_rate = 1.to_string();
+
+    let opts = App::new(APP_NAME)
+        .version(APP_VERSION)
+        .author("Flier Lu <flier.lu@gmail.com>")
+        .arg(Arg::with_name("listen")
+                 .short("l")
+                 .long("listen")
+                 .value_name("HOST[:PORT]")
+                 .takes_value(true)
+                 .default_value("127.0.0.1:8080")
+                 .help("Start listening to an address over HTTP."))
+        .arg(Arg::with_name("threads")
+                 .short("t")
+                 .long("threads")
+                 .value_name("NUM")
+                 .takes_value(true)
+                 .default_value(&default_threads)
+                 .help("Number of multiple threads to handle requests"))
+        .arg(Arg::with_name("sample-rate")
+                 .short("s")
+                 .long("sample-rate")
+                 .value_name("NUM")
+                 .takes_value(true)
+                 .default_value(&default_sample_rate)
+                 .help("Sample rate for span tracing"))
+        .get_matches();
+
+    Ok(Config {
+           addr: opts.value_of("listen").unwrap().to_owned(),
+           threads: opts.value_of("threads").unwrap().parse()?,
+           sample_rate: opts.value_of("sample-rate").unwrap().parse()?,
+       })
+}
+
 fn main() {
     pretty_env_logger::init().unwrap();
 
@@ -315,6 +388,7 @@ fn main() {
     let proxy = SimpleProxy {
         addr: cfg.addr.clone(),
         proto: "http".to_owned(),
+        tracer: zipkin::Tracer::with_sampler(zipkin::FixedRate::new(cfg.sample_rate)),
     };
 
     let server = Server::http(cfg.addr.clone()).unwrap();

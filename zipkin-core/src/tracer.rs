@@ -30,6 +30,10 @@ impl<'a, S> Tracer<S>
             ..span
         }
     }
+
+    pub fn submit(&self, span: Span<'a>) {}
+
+    pub fn submit_all(&self, span: &[Span<'a>]) {}
 }
 
 #[cfg(test)]

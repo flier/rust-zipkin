@@ -187,21 +187,21 @@ impl<'a> From<bool> for Value<'a> {
     }
 }
 
+impl<'a> From<i8> for Value<'a> {
+    fn from(v: i8) -> Self {
+        Value::I16(v as i16)
+    }
+}
+
+impl<'a> From<u8> for Value<'a> {
+    fn from(v: u8) -> Self {
+        Value::I16(v as i16)
+    }
+}
+
 impl<'a> From<i16> for Value<'a> {
     fn from(v: i16) -> Self {
         Value::I16(v)
-    }
-}
-
-impl<'a> From<i32> for Value<'a> {
-    fn from(v: i32) -> Self {
-        Value::I32(v)
-    }
-}
-
-impl<'a> From<i64> for Value<'a> {
-    fn from(v: i64) -> Self {
-        Value::I64(v)
     }
 }
 
@@ -211,14 +211,38 @@ impl<'a> From<u16> for Value<'a> {
     }
 }
 
+impl<'a> From<i32> for Value<'a> {
+    fn from(v: i32) -> Self {
+        Value::I32(v)
+    }
+}
+
 impl<'a> From<u32> for Value<'a> {
     fn from(v: u32) -> Self {
         Value::I32(v as i32)
     }
 }
 
+impl<'a> From<i64> for Value<'a> {
+    fn from(v: i64) -> Self {
+        Value::I64(v)
+    }
+}
+
 impl<'a> From<u64> for Value<'a> {
     fn from(v: u64) -> Self {
+        Value::I64(v as i64)
+    }
+}
+
+impl<'a> From<isize> for Value<'a> {
+    fn from(v: isize) -> Self {
+        Value::I64(v as i64)
+    }
+}
+
+impl<'a> From<usize> for Value<'a> {
+    fn from(v: usize) -> Self {
         Value::I64(v as i64)
     }
 }
@@ -323,6 +347,19 @@ impl<'a> Span<'a> {
             name: name,
             id: next_id(),
             timestamp: UTC::now(),
+            ..unsafe { mem::zeroed() }
+        }
+    }
+
+    pub fn child(&self, name: &'a str) -> Span<'a> {
+        Span {
+            trace_id: self.trace_id.clone(),
+            name: name,
+            id: next_id(),
+            parent_id: Some(self.id),
+            timestamp: UTC::now(),
+            debug: self.debug,
+            sampled: self.sampled,
             ..unsafe { mem::zeroed() }
         }
     }
