@@ -58,6 +58,7 @@ impl<'a, E, T> Collector for BaseCollector<E, T>
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Mutex;
     use std::marker::PhantomData;
 
     use bytes::{BytesMut, BufMut};
@@ -125,16 +126,16 @@ mod tests {
     fn submit() {
         let span = Span::new("test");
 
-        let mut collector = BaseCollector {
+        let collector = BaseCollector {
             max_message_size: 1024,
-            encoder: MockEncoder::new(),
-            transport: MockTransport::new(),
+            encoder: Mutex::new(MockEncoder::new()),
+            transport: Mutex::new(MockTransport::new()),
         };
 
         collector.submit(span).unwrap();
 
-        assert_eq!(collector.encoder.encoded, 1);
-        assert_eq!(collector.transport.sent, 1);
-        assert_eq!(collector.transport.buf, b"hello world");
+        assert_eq!(collector.encoder.lock().unwrap().encoded, 1);
+        assert_eq!(collector.transport.lock().unwrap().sent, 1);
+        assert_eq!(collector.transport.lock().unwrap().buf, b"hello world");
     }
 }

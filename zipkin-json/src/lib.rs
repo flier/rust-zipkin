@@ -8,8 +8,6 @@ extern crate tokio_io;
 extern crate zipkin_core;
 
 #[cfg(test)]
-extern crate chrono;
-#[cfg(test)]
 extern crate diff;
 
 pub mod errors;

@@ -165,16 +165,16 @@ mod tests {
     fn async_submit() {
         let span = Span::new("test");
 
-        let mut collector = BaseAsyncCollector {
+        let collector = BaseAsyncCollector {
             max_message_size: 1024,
-            encoder: MockEncoder::new(),
+            encoder: Arc::new(Mutex::new(MockEncoder::new())),
             transport: Arc::new(Mutex::new(MockTransport::new())),
             thread_pool: CpuPool::new(1),
         };
 
         collector.async_submit(span).wait().unwrap();
 
-        assert_eq!(collector.encoder.encoded, 1);
+        assert_eq!(collector.encoder.lock().unwrap().encoded, 1);
         assert_eq!(collector.transport.lock().unwrap().sent, 1);
         assert_eq!(collector.transport.lock().unwrap().buf, b"hello world");
     }

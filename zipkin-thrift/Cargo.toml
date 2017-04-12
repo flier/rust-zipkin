@@ -16,4 +16,3 @@ thrift = { path = "thrift/lib/rs" }
 zipkin-core = { path = "../zipkin-core" }
 
 [dev-dependencies]
-chrono = "0.3"

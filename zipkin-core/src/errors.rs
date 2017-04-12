@@ -12,7 +12,7 @@ error_chain! {
 }
 
 impl<T> From<::std::sync::PoisonError<T>> for Error {
-    fn from(err: ::std::sync::PoisonError<T>) -> Self {
+    fn from(_: ::std::sync::PoisonError<T>) -> Self {
         ErrorKind::PoisonError.into()
     }
 }

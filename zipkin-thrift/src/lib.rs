@@ -9,9 +9,6 @@ extern crate tokio_io;
 
 extern crate zipkin_core;
 
-#[cfg(test)]
-extern crate chrono;
-
 mod core;
 pub mod errors;
 mod encode;

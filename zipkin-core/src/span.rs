@@ -1,10 +1,9 @@
 use std::mem;
 use std::sync::Arc;
 use std::cell::RefCell;
-use std::time::Duration;
 use std::net::SocketAddr;
 
-use chrono::prelude::*;
+use time;
 
 use rand::{self, Rng};
 
@@ -55,7 +54,30 @@ impl TraceId {
 pub type SpanId = u64;
 
 /// Epoch microseconds
-pub type Timestamp = DateTime<UTC>;
+pub type Timestamp = time::Timespec;
+
+pub fn now() -> Timestamp {
+    time::now_utc().to_timespec()
+}
+
+pub fn timestamp(sec: i64, nsec: i32) -> Timestamp {
+    Timestamp {
+        sec: sec,
+        nsec: nsec,
+    }
+}
+
+pub trait ToMicrosecond {
+    fn to_microseconds(&self) -> i64;
+}
+
+impl ToMicrosecond for Timestamp {
+    fn to_microseconds(&self) -> i64 {
+        self.sec * 1000_000 + self.nsec as i64 / 1000
+    }
+}
+
+pub type Duration = time::Duration;
 
 /// Indicates the network context of a service recording an annotation with two exceptions.
 #[derive(Clone, Debug)]
@@ -81,7 +103,7 @@ impl<'a> Annotation<'a> {
     fn new(value: &'a str, endpoint: Option<Arc<Endpoint<'a>>>) -> Annotation<'a> {
         Annotation {
             value: value,
-            timestamp: UTC::now(),
+            timestamp: now(),
             endpoint: endpoint,
         }
     }
@@ -346,7 +368,7 @@ impl<'a> Span<'a> {
             trace_id: TraceId::gen(),
             name: name,
             id: next_id(),
-            timestamp: UTC::now(),
+            timestamp: now(),
             ..unsafe { mem::zeroed() }
         }
     }
@@ -357,7 +379,7 @@ impl<'a> Span<'a> {
             name: name,
             id: next_id(),
             parent_id: Some(self.id),
-            timestamp: UTC::now(),
+            timestamp: now(),
             debug: self.debug,
             sampled: self.sampled,
             ..unsafe { mem::zeroed() }
@@ -480,7 +502,7 @@ mod tests {
 
         assert!(span.id != 0);
         assert_eq!(span.parent_id, None);
-        assert!(span.timestamp.timestamp() != 0);
+        assert!(span.timestamp.to_microseconds() != 0);
         assert_eq!(span.duration, None);
         assert!(span.annotations.is_empty());
         assert!(span.binary_annotations.is_empty());
@@ -505,7 +527,7 @@ mod tests {
 
             assert_eq!(span.annotations.len(), 1);
             assert_eq!(annonation.value, CLIENT_SEND);
-            assert!(annonation.timestamp.timestamp() != 0);
+            assert!(annonation.timestamp.to_microseconds() != 0);
             assert!(annonation.endpoint.is_some());
             assert_eq!(annonation.endpoint.as_ref().unwrap().name, Some("test"));
         }
@@ -515,7 +537,7 @@ mod tests {
 
             assert_eq!(span.annotations.len(), 2);
             assert_eq!(annonation.value, CLIENT_RECV);
-            assert!(annonation.timestamp.timestamp() != 0);
+            assert!(annonation.timestamp.to_microseconds() != 0);
             assert!(annonation.endpoint.is_none());
         }
         span.binary_annotate(HTTP_METHOD, "GET", endpoint.clone());

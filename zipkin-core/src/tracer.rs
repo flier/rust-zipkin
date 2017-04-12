@@ -1,5 +1,5 @@
 use sampler::Sampler;
-use span::Span;
+use span::{Span, now};
 use collector::Collector;
 
 #[derive(Clone, Debug, Default)]
@@ -41,26 +41,52 @@ impl<'a, S, C> Tracer<S, C>
     }
 
     pub fn submit(&self,
-                  span: Span<'a>)
+                  mut span: Span<'a>)
                   -> Result<<C as Collector>::Output, <C as Collector>::Error> {
+        span.duration = Some(now() - span.timestamp);
+
         self.collector.submit(span)
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::marker::PhantomData;
+
+    use super::super::*;
     use super::*;
-    use super::super::sampler::*;
+    use errors::*;
+
+    struct MockCollector<'a, T: 'a>(PhantomData<&'a T>);
+
+    unsafe impl<'a, T> Sync for MockCollector<'a, T> {}
+    unsafe impl<'a, T> Send for MockCollector<'a, T> {}
+
+    impl<'a> Default for MockCollector<'a, Span<'a>> {
+        fn default() -> Self {
+            MockCollector(PhantomData)
+        }
+    }
+
+    impl<'a> Collector for MockCollector<'a, Span<'a>> {
+        type Item = Span<'a>;
+        type Output = ();
+        type Error = Error;
+
+        fn submit(&self, _: Span<'a>) -> Result<()> {
+            Ok(())
+        }
+    }
 
     #[test]
     fn sampling() {
-        let mut tracer = Tracer::with_sampler(FixedRate::new(2));
+        let mut tracer = Tracer::with_sampler(FixedRate::new(2), MockCollector::default());
 
         assert_eq!(tracer.span("test1").sampled, Some(true));
         assert_eq!(tracer.span("test2").sampled, Some(false));
         assert_eq!(tracer.span("test3").sampled, Some(true));
 
-        tracer = Tracer::new();
+        tracer = Tracer::new(MockCollector::default());
 
         assert_eq!(tracer.span("test1").sampled, None);
     }

@@ -1,7 +1,6 @@
 use std::str;
-use std::string::String;
-use std::time::Duration;
 use std::io::prelude::*;
+use std::string::String;
 use std::net::SocketAddr;
 
 use serde_json;
@@ -9,8 +8,8 @@ use serde_json::{Map, Value, Result};
 
 use base64;
 
-use zipkin_core::{self as zipkin, TraceId, SpanId, Timestamp, Endpoint, Annotation,
-                  BinaryAnnotation, Span};
+use zipkin_core::{self as zipkin, TraceId, SpanId, Timestamp, ToMicrosecond, Duration, Endpoint,
+                  Annotation, BinaryAnnotation, Span};
 
 pub trait ToJson {
     fn to_json(&self) -> Value;
@@ -35,15 +34,13 @@ impl ToJson for SpanId {
 
 impl ToJson for Timestamp {
     fn to_json(&self) -> Value {
-        let ts = self.timestamp() * 1000_000 + self.timestamp_subsec_micros() as i64;
-
-        ts.into()
+        self.to_microseconds().into()
     }
 }
 
 impl ToJson for Duration {
     fn to_json(&self) -> Value {
-        From::from(self.as_secs() * 1000_000 + self.subsec_nanos() as u64 / 1000)
+        self.num_milliseconds().into()
     }
 }
 
@@ -201,7 +198,6 @@ mod tests {
     use std::sync::Arc;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
-    use chrono::prelude::*;
     use diff;
 
     use zipkin_core::*;
@@ -236,9 +232,9 @@ mod tests {
         span.binary_annotate("raw", &b"some\0raw\0data"[..], None);
 
 
-        span.annotations[0].timestamp = UTC.timestamp(0, 0);
-        span.annotations[1].timestamp = UTC.timestamp(0, 0);
-        span.timestamp = UTC.timestamp(0, 0);
+        span.annotations[0].timestamp = timestamp(0, 0);
+        span.annotations[1].timestamp = timestamp(0, 0);
+        span.timestamp = timestamp(0, 0);
 
         let json = to_string_pretty(&span).unwrap();
         let diffs: Vec<String> = diff::lines(&json,

@@ -3,7 +3,6 @@ use std::mem;
 use std::rc::Rc;
 use std::ops::Deref;
 use std::cell::RefCell;
-use std::time::Duration;
 use std::io::prelude::*;
 use std::net::SocketAddr;
 
@@ -14,6 +13,7 @@ use thrift::protocol::{TListIdentifier, TType, TOutputProtocol, TBinaryOutputPro
 use thrift::transport::{TBufferTransport, TPassThruTransport};
 
 use zipkin_core as zipkin;
+use zipkin_core::ToMicrosecond;
 
 use core;
 use errors::Result;
@@ -24,13 +24,13 @@ trait ToI64 {
 
 impl ToI64 for zipkin::Timestamp {
     fn to_i64(&self) -> i64 {
-        self.timestamp() * 1000_000 + self.timestamp_subsec_micros() as i64
+        self.to_microseconds()
     }
 }
 
-impl ToI64 for Duration {
+impl ToI64 for zipkin::Duration {
     fn to_i64(&self) -> i64 {
-        From::from(self.as_secs() as i64 * 1000_000 + self.subsec_nanos() as i64 / 1000)
+        self.num_milliseconds()
     }
 }
 
@@ -237,8 +237,6 @@ mod tests {
     use std::sync::Arc;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
-    use chrono::prelude::*;
-
     use zipkin_core::*;
 
     use super::*;
@@ -271,9 +269,9 @@ mod tests {
         span.binary_annotate("time", 123.456, None);
         span.binary_annotate("raw", &b"some\0raw\0data"[..], None);
 
-        span.annotations[0].timestamp = UTC.timestamp(123, 456);
-        span.annotations[1].timestamp = UTC.timestamp(123, 456);
-        span.timestamp = UTC.timestamp(123, 456);
+        span.annotations[0].timestamp = timestamp(123, 456);
+        span.annotations[1].timestamp = timestamp(123, 456);
+        span.timestamp = timestamp(123, 456);
 
         let msg = span.to_thrift();
 
