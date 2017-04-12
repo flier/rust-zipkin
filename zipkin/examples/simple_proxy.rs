@@ -18,6 +18,7 @@ extern crate zipkin;
 
 use std::io::prelude::*;
 use std::net::{TcpStream, Shutdown};
+use std::sync::Arc;
 use std::thread;
 use std::marker::PhantomData;
 
@@ -61,12 +62,12 @@ struct SimpleProxy<'a, S, C>
 {
     addr: String,
     proto: String,
-    tracer: zipkin::Tracer<S, C>,
+    tracer: Arc<zipkin::Tracer<S, C>>,
 }
 
 impl<'a, S, C> Handler for SimpleProxy<'a, S, C>
-    where S: zipkin::Sampler<Item = zipkin::Span<'a>>,
-          C: zipkin::Collector<Item = zipkin::Span<'a>, Output = (), Error = Error>
+    where S: 'static + zipkin::Sampler<Item = zipkin::Span<'a>>,
+          C: 'static + zipkin::Collector<Item = zipkin::Span<'a>, Output = (), Error = Error>
 {
     fn handle(&self, req: Request, mut res: Response) {
         debug!("request from {}: {} {} {}",
@@ -100,8 +101,8 @@ impl<'a, S, C> Handler for SimpleProxy<'a, S, C>
 }
 
 impl<'a, S, C> SimpleProxy<'a, S, C>
-    where S: zipkin::Sampler<Item = zipkin::Span<'a>>,
-          C: zipkin::Collector<Item = zipkin::Span<'a>, Output = (), Error = Error>
+    where S: 'static + zipkin::Sampler<Item = zipkin::Span<'a>>,
+          C: 'static + zipkin::Collector<Item = zipkin::Span<'a>, Output = (), Error = Error>
 {
     fn serve_http_request(&self,
                           req: Request,
@@ -236,7 +237,7 @@ impl<'a, S, C> SimpleProxy<'a, S, C>
                         mut res: Response,
                         mut span: zipkin::Span<'a>)
                         -> Result<()> {
-        info!("serve HTTP connection proxy");
+        info!("serve HTTP connection proxy to {}", req.uri);
 
         let stream = if let RequestUri::Authority(ref addr) = req.uri {
             Some(TcpStream::connect(addr)?)
@@ -256,10 +257,10 @@ impl<'a, S, C> SimpleProxy<'a, S, C>
 
         annotate!(span, zipkin::SERVER_SEND);
 
-        if let Some(upstream) = stream {
-            if let Some(&HttpStream(ref client)) = req.downcast_ref::<HttpStream>() {
-                Pipe::new(client.try_clone()?, upstream).run()?;
-            }
+        if let (Some(ref upstream), Some(&HttpStream(ref client))) =
+            (stream, req.downcast_ref::<HttpStream>()) {
+            Pipe::new(client.try_clone()?, upstream.try_clone()?)
+                .run(self.tracer.clone(), span.id)?;
         }
 
         self.tracer.submit(span)?;
@@ -281,25 +282,53 @@ impl Pipe {
         }
     }
 
-    fn run<'a>(&mut self) -> Result<()> {
+    fn run<'a, S, C>(&mut self,
+                     tracer: Arc<zipkin::Tracer<S, C>>,
+                     parent_id: zipkin::SpanId)
+                     -> Result<()>
+        where S: 'static + zipkin::Sampler<Item = zipkin::Span<'a>>,
+              C: 'static + zipkin::Collector<Item = zipkin::Span<'a>, Output = (), Error = Error>
+    {
         self.upstream.set_nodelay(true)?;
         self.client.set_nodelay(true)?;
 
-        let upstream = self.upstream.try_clone()?;
-        let client = self.client.try_clone()?;
+        {
+            let tracer = tracer.clone();
+            let upstream = self.upstream.try_clone()?;
+            let client = self.client.try_clone()?;
 
-        thread::spawn(move || { Self::copy(upstream, client).unwrap(); });
+            thread::spawn(move || {
+                              Self::copy(upstream, client, tracer, parent_id, false).unwrap();
+                          });
+        }
 
-        let upstream = self.upstream.try_clone()?;
-        let client = self.client.try_clone()?;
+        {
+            let tracer = tracer.clone();
+            let upstream = self.upstream.try_clone()?;
+            let client = self.client.try_clone()?;
 
-        thread::spawn(move || { Self::copy(client, upstream).unwrap(); });
+            thread::spawn(move || {
+                              Self::copy(client, upstream, tracer, parent_id, true).unwrap();
+                          });
+        }
 
         Ok(())
     }
 
-    fn copy<'a>(mut from: TcpStream, mut to: TcpStream) -> Result<()> {
+    fn copy<'a, S, C>(mut from: TcpStream,
+                      mut to: TcpStream,
+                      tracer: Arc<zipkin::Tracer<S, C>>,
+                      parent_id: zipkin::SpanId,
+                      to_upstream: bool)
+                      -> Result<()>
+        where S: 'static + zipkin::Sampler<Item = zipkin::Span<'a>>,
+              C: 'static + zipkin::Collector<Item = zipkin::Span<'a>, Output = (), Error = Error>
+    {
         let mut buf = [0; 4096];
+
+        let mut span = tracer
+            .span(if to_upstream { "upstream" } else { "client" })
+            .with_parent_id(parent_id);
 
         loop {
             match from.read(&mut buf) {
@@ -308,15 +337,21 @@ impl Pipe {
 
                     to.shutdown(Shutdown::Write)?;
 
+                    annotate!(span, if to_upstream { zipkin::CLIENT_RECV } else { zipkin::SERVER_RECV });
+
                     break;
                 }
 
                 Ok(read) => {
                     debug!("received {} bytes from {}", read, from.peer_addr()?);
 
+                    annotate!(span, if to_upstream { zipkin::CLIENT_RECV_FRAGMENT } else { zipkin::SERVER_RECV_FRAGMENT });
+
                     match to.write(&buf[..read]) {
                         Ok(wrote) => {
                             debug!("sent {} bytes to {}", wrote, to.peer_addr()?);
+
+                            annotate!(span, if to_upstream { zipkin::CLIENT_SEND_FRAGMENT } else { zipkin::SERVER_SEND_FRAGMENT });
                         }
                         Err(err) => {
                             warn!("fail to send to {}, {}", to.peer_addr()?, err);
@@ -333,6 +368,8 @@ impl Pipe {
                 }
             }
         }
+
+        tracer.submit(span)?;
 
         Ok(())
     }
@@ -411,8 +448,8 @@ fn main() {
 
     info!("listening on {}", cfg.addr);
 
-    let tracer = zipkin::Tracer::with_sampler(zipkin::FixedRate::new(cfg.sample_rate),
-                                              DummyCollector::default());
+    let tracer = Arc::new(zipkin::Tracer::with_sampler(zipkin::FixedRate::new(cfg.sample_rate),
+                                                       DummyCollector::default()));
 
     let proxy = SimpleProxy {
         addr: cfg.addr.clone(),
