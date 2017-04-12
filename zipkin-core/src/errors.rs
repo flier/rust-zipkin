@@ -5,6 +5,14 @@ error_chain! {
     }
     errors {
         SendError
-        PoisonError
+        PoisonError {
+            description("poisoned lock: another task failed inside")
+        }
+    }
+}
+
+impl<T> From<::std::sync::PoisonError<T>> for Error {
+    fn from(err: ::std::sync::PoisonError<T>) -> Self {
+        ErrorKind::PoisonError.into()
     }
 }

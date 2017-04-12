@@ -37,16 +37,17 @@ pub struct KafkaTransport {
 
 impl KafkaTransport {
     pub fn new(config: KafkaConfig) -> Result<Self> {
-        let producer = Producer::from_hosts(config.hosts).with_compression(config.compression)
+        let producer = Producer::from_hosts(config.hosts)
+            .with_compression(config.compression)
             .with_ack_timeout(config.ack_timeout)
             .with_connection_idle_timeout(config.connection_idle_timeout)
             .with_required_acks(config.required_acks)
             .create()?;
 
         Ok(KafkaTransport {
-            producer: producer,
-            topic: config.topic,
-        })
+               producer: producer,
+               topic: config.topic,
+           })
     }
 }
 
@@ -54,7 +55,7 @@ impl<B: AsRef<[u8]>> Transport<B> for KafkaTransport {
     type Output = ();
     type Error = Error;
 
-    fn send(&mut self, buf: &B) -> Result<Self::Output> {
+    fn send(&mut self, buf: &B) -> Result<()> {
         let record = Record::from_key_value(&self.topic, (), buf.as_ref());
 
         self.producer.send(&record)?;

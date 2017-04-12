@@ -10,7 +10,7 @@ use tokio_io::codec::Encoder;
 
 use zipkin_core::{Span, Transport, Collector};
 
-use errors::Error;
+use errors::{Error, Result};
 
 pub trait AsyncCollector {
     type Item;
@@ -18,31 +18,43 @@ pub trait AsyncCollector {
     type Error;
     type Result: Future<Item = Self::Output, Error = Self::Error>;
 
-    fn async_submit(&mut self, item: Self::Item) -> Self::Result;
+    fn async_submit(&self, item: Self::Item) -> Self::Result;
 }
 
 #[derive(Clone)]
 pub struct BaseAsyncCollector<E, T> {
     pub max_message_size: usize,
-    pub encoder: E,
+    pub encoder: Arc<Mutex<E>>,
     pub transport: Arc<Mutex<T>>,
     pub thread_pool: CpuPool,
 }
 
+impl<'a, E, T> BaseAsyncCollector<E, T>
+    where E: Encoder<Item = Span<'a>, Error = Error>
+{
+    fn encode(&self, span: Span<'a>, buf: &mut BytesMut) -> Result<()> {
+        self.encoder.lock()?.encode(span, buf)?;
+
+        Ok(())
+    }
+}
+
 impl<'a, E, T> Collector for BaseAsyncCollector<E, T>
-    where E: Encoder<Item = Span<'a>, Error = Error>,
+    where E: Encoder<Item = Span<'a>, Error = Error> + Sync + Send,
           T: Transport<BytesMut, Error = Error>
 {
     type Item = Span<'a>;
     type Output = ();
     type Error = Error;
 
-    fn submit(&mut self, span: Span<'a>) -> Result<Self::Output, Self::Error> {
+    fn submit(&self, span: Span<'a>) -> Result<()> {
         let mut buf = BytesMut::with_capacity(self.max_message_size);
 
-        self.encoder.encode(span, &mut buf)?;
+        self.encode(span, &mut buf)?;
 
-        self.transport.lock()?.send(&buf)?;
+        {
+            self.transport.lock()?.send(&buf)?;
+        }
 
         Ok(())
     }
@@ -57,10 +69,10 @@ impl<'a, E, T> AsyncCollector for BaseAsyncCollector<E, T>
     type Error = Error;
     type Result = BoxFuture<Self::Output, Self::Error>;
 
-    fn async_submit(&mut self, item: Self::Item) -> Self::Result {
+    fn async_submit(&self, span: Span<'a>) -> Self::Result {
         let mut buf = BytesMut::with_capacity(self.max_message_size);
 
-        if let Err(err) = self.encoder.encode(item, &mut buf) {
+        if let Err(err) = self.encode(span, &mut buf) {
             return future::err(err).boxed();
         }
 
@@ -68,10 +80,10 @@ impl<'a, E, T> AsyncCollector for BaseAsyncCollector<E, T>
 
         self.thread_pool
             .spawn_fn(move || {
-                transport.lock()?.send(&buf)?;
+                          transport.lock()?.send(&buf)?;
 
-                Ok(())
-            })
+                          Ok(())
+                      })
             .boxed()
     }
 }

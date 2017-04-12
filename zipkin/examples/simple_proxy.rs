@@ -19,6 +19,7 @@ extern crate zipkin;
 use std::io::prelude::*;
 use std::net::{TcpStream, Shutdown};
 use std::thread;
+use std::marker::PhantomData;
 
 use clap::{Arg, App};
 
@@ -55,16 +56,17 @@ error_chain!{
     }
 }
 
-struct SimpleProxy<'a, S>
+struct SimpleProxy<'a, S, C>
     where S: zipkin::Sampler<Item = zipkin::Span<'a>>
 {
     addr: String,
     proto: String,
-    tracer: zipkin::Tracer<S>,
+    tracer: zipkin::Tracer<S, C>,
 }
 
-impl<'a, S> Handler for SimpleProxy<'a, S>
-    where S: zipkin::Sampler<Item = zipkin::Span<'a>>
+impl<'a, S, C> Handler for SimpleProxy<'a, S, C>
+    where S: zipkin::Sampler<Item = zipkin::Span<'a>>,
+          C: zipkin::Collector<Item = zipkin::Span<'a>, Output = (), Error = Error>
 {
     fn handle(&self, req: Request, mut res: Response) {
         debug!("request from {}: {} {} {}",
@@ -97,8 +99,9 @@ impl<'a, S> Handler for SimpleProxy<'a, S>
     }
 }
 
-impl<'a, S> SimpleProxy<'a, S>
-    where S: zipkin::Sampler<Item = zipkin::Span<'a>>
+impl<'a, S, C> SimpleProxy<'a, S, C>
+    where S: zipkin::Sampler<Item = zipkin::Span<'a>>,
+          C: zipkin::Collector<Item = zipkin::Span<'a>, Output = (), Error = Error>
 {
     fn serve_http_request(&self,
                           req: Request,
@@ -130,7 +133,7 @@ impl<'a, S> SimpleProxy<'a, S>
 
         annotate!(span, zipkin::SERVER_SEND);
 
-        self.tracer.submit(span);
+        self.tracer.submit(span)?;
 
         Ok(())
     }
@@ -199,7 +202,7 @@ impl<'a, S> SimpleProxy<'a, S>
         annotate!(upstream_span, zipkin::HTTP_RESPONSE_SIZE, buf.len());
         annotate!(upstream_span, zipkin::CLIENT_RECV);
 
-        self.tracer.submit(upstream_span);
+        self.tracer.submit(upstream_span)?;
 
         info!("received response with {} bytes body from upstream: {} {}", buf.len(), cres.version, cres.status);
         debug!("received headers:\n{}", cres.headers);
@@ -223,7 +226,7 @@ impl<'a, S> SimpleProxy<'a, S>
 
         annotate!(span, zipkin::SERVER_SEND);
 
-        self.tracer.submit(span);
+        self.tracer.submit(span)?;
 
         Ok(())
     }
@@ -259,7 +262,7 @@ impl<'a, S> SimpleProxy<'a, S>
             }
         }
 
-        self.tracer.submit(span);
+        self.tracer.submit(span)?;
 
         Ok(())
     }
@@ -335,6 +338,29 @@ impl Pipe {
     }
 }
 
+struct DummyCollector<'a, T: 'a>(PhantomData<&'a T>);
+
+unsafe impl<'a, T> Sync for DummyCollector<'a, T> {}
+unsafe impl<'a, T> Send for DummyCollector<'a, T> {}
+
+impl<'a> Default for DummyCollector<'a, zipkin::Span<'a>> {
+    fn default() -> Self {
+        DummyCollector(PhantomData)
+    }
+}
+
+impl<'a> zipkin::Collector for DummyCollector<'a, zipkin::Span<'a>> {
+    type Item = zipkin::Span<'a>;
+    type Output = ();
+    type Error = Error;
+
+    fn submit(&self, span: zipkin::Span<'a>) -> Result<()> {
+        info!("{:?}", span);
+
+        Ok(())
+    }
+}
+
 struct Config {
     addr: String,
     threads: usize,
@@ -385,10 +411,13 @@ fn main() {
 
     info!("listening on {}", cfg.addr);
 
+    let tracer = zipkin::Tracer::with_sampler(zipkin::FixedRate::new(cfg.sample_rate),
+                                              DummyCollector::default());
+
     let proxy = SimpleProxy {
         addr: cfg.addr.clone(),
         proto: "http".to_owned(),
-        tracer: zipkin::Tracer::with_sampler(zipkin::FixedRate::new(cfg.sample_rate)),
+        tracer: tracer,
     };
 
     let server = Server::http(cfg.addr.clone()).unwrap();

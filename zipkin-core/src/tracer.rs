@@ -1,24 +1,33 @@
 use sampler::Sampler;
 use span::Span;
+use collector::Collector;
 
 #[derive(Clone, Debug, Default)]
-pub struct Tracer<S> {
+pub struct Tracer<S, C> {
     pub sampler: Option<S>,
+    pub collector: C,
 }
 
-impl<'a, S> Tracer<S> {
-    pub fn new() -> Self {
-        Tracer { sampler: None }
+impl<'a, S, C> Tracer<S, C> {
+    pub fn new(collector: C) -> Self {
+        Tracer {
+            sampler: None,
+            collector: collector,
+        }
+    }
+
+    pub fn with_sampler(sampler: S, collector: C) -> Self {
+        Tracer {
+            sampler: Some(sampler),
+            collector: collector,
+        }
     }
 }
 
-impl<'a, S> Tracer<S>
-    where S: Sampler<Item = Span<'a>>
+impl<'a, S, C> Tracer<S, C>
+    where S: Sampler<Item = Span<'a>>,
+          C: Collector<Item = Span<'a>>
 {
-    pub fn with_sampler(sampler: S) -> Self {
-        Tracer { sampler: Some(sampler) }
-    }
-
     pub fn span(&self, name: &'a str) -> Span<'a> {
         let span = Span::new(name);
         let sampled = self.sampler
@@ -31,9 +40,11 @@ impl<'a, S> Tracer<S>
         }
     }
 
-    pub fn submit(&self, span: Span<'a>) {}
-
-    pub fn submit_all(&self, span: &[Span<'a>]) {}
+    pub fn submit(&self,
+                  span: Span<'a>)
+                  -> Result<<C as Collector>::Output, <C as Collector>::Error> {
+        self.collector.submit(span)
+    }
 }
 
 #[cfg(test)]
