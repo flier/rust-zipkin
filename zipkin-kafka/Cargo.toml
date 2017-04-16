@@ -5,6 +5,6 @@ authors = ["Flier Lu <flier.lu@gmail.com>"]
 
 [dependencies]
 error-chain = "0.10"
-kafka = { git = "https://github.com/flier/kafka-rust.git", branch = "openssl-0.9" }
+kafka = { git = "https://github.com/spicavigo/kafka-rust.git" }
 
 zipkin-core = { path = "../zipkin-core" }
