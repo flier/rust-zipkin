@@ -13,6 +13,12 @@ http = ["zipkin-http"]
 doc = []
 
 [dependencies]
+error-chain = "0.10"
+url = "1.4"
+bytes = "0.4"
+tokio-io = "0.1"
+mime = "0.2"
+
 zipkin-core = { path = "../zipkin-core" }
 zipkin-async = { path = "../zipkin-async", optional = true }
 zipkin-json = { path = "../zipkin-json", optional = true }
@@ -25,6 +31,7 @@ error-chain = "0.10"
 log = "0.3"
 pretty_env_logger = "0.1"
 clap = "2"
+url = "1.4"
 hyper = "0.10"
 native-tls = "0.1"
 hyper-native-tls = "0.2"

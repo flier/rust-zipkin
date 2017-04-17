@@ -1,6 +1,7 @@
 use std::time::Duration;
+use std::marker::PhantomData;
 
-use hyper::{self, Url};
+use hyper;
 use hyper::mime::Mime;
 use hyper::client::{pool, Client, RedirectPolicy};
 use hyper::header::{Headers, ContentType};
@@ -39,41 +40,50 @@ impl HttpConfig {
     }
 }
 
-pub struct HttpTransport {
-    base: Url,
+pub struct HttpTransport<E> {
+    base: hyper::Url,
     config: HttpConfig,
+    phantom: PhantomData<E>,
 }
 
-impl HttpTransport {
-    pub fn new(base: Url, config: HttpConfig) -> Self {
-        HttpTransport {
-            base: base,
-            config: config,
-        }
+impl<E> HttpTransport<E> {
+    pub fn new(base: &str, config: HttpConfig) -> Result<Self> {
+        Ok(HttpTransport {
+               base: hyper::Url::parse(base)?,
+               config: config,
+               phantom: PhantomData,
+           })
     }
 }
 
-impl<B: AsRef<[u8]>> Transport<B> for HttpTransport {
+impl<B: AsRef<[u8]>, E> Transport<B> for HttpTransport<E>
+    where E: 'static + From<::hyper::Error> + From<Error> + Send
+{
     type Output = ();
-    type Error = Error;
+    type Error = E;
 
-    fn send(&mut self, buf: &B) -> Result<Self::Output> {
+    fn send(&mut self, buf: &B) -> ::std::result::Result<(), Self::Error> {
         let mut client =
-            self.config.max_idle_connections.map_or_else(|| Client::new(), |max_idle| {
-                Client::with_pool_config(pool::Config { max_idle: max_idle })
-            });
+            self.config
+                .max_idle_connections
+                .map_or_else(|| Client::new(), |max_idle| {
+                    Client::with_pool_config(pool::Config { max_idle: max_idle })
+                });
 
         client.set_redirect_policy(self.config.redirect_policy);
         client.set_read_timeout(self.config.read_timeout);
         client.set_write_timeout(self.config.write_timeout);
 
-        let res = client.post(self.base.clone())
+        let res = client
+            .post(self.base.clone())
             .body(buf.as_ref())
             .headers(self.config.headers())
             .send()?;
 
         if res.status != hyper::Ok {
-            bail!(ErrorKind::ResponseError(res.status))
+            let err: Error = ErrorKind::ResponseError(res.status).into();
+
+            bail!(err)
         } else {
             Ok(())
         }

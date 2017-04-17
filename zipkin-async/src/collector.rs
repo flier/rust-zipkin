@@ -124,7 +124,7 @@ mod tests {
         type Output = ();
         type Error = Error;
 
-        fn send(&mut self, buf: &B) -> Result<Self::Output, Self::Error> {
+        fn send(&mut self, buf: &B) -> ::std::result::Result<Self::Output, Self::Error> {
             self.sent += 1;
             self.buf.append(&mut buf.as_ref().to_vec());
 
@@ -151,7 +151,10 @@ mod tests {
         type Item = Span<'a>;
         type Error = Error;
 
-        fn encode(&mut self, _: Self::Item, buf: &mut BytesMut) -> Result<(), Self::Error> {
+        fn encode(&mut self,
+                  _: Self::Item,
+                  buf: &mut BytesMut)
+                  -> std::result::Result<(), Self::Error> {
             self.encoded += 1;
 
             buf.put("hello");

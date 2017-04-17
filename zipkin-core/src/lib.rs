@@ -5,6 +5,7 @@ extern crate rand;
 extern crate xoroshiro128;
 extern crate bytes;
 extern crate tokio_io;
+extern crate mime;
 
 pub mod constants;
 pub mod errors;
@@ -18,4 +19,4 @@ pub use span::{TraceId, SpanId, Timestamp, timestamp, now, ToMicrosecond, Durati
                Annotation, Value, BinaryAnnotation, BinaryAnnotationValue, Annotatable, Span};
 pub use sampler::{Sampler, FixedRate, RateLimit};
 pub use tracer::Tracer;
-pub use collector::{Transport, Collector, BaseCollector};
+pub use collector::{MimeType, Transport, Collector, BaseCollector};

@@ -4,6 +4,9 @@ extern crate kafka;
 
 extern crate zipkin_core;
 
+pub use kafka::producer::{Compression, RequiredAcks};
+pub use kafka::error::Error as KafkaError;
+
 pub mod errors;
 mod transport;
 

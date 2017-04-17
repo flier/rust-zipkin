@@ -4,35 +4,43 @@ use tokio_io::codec::Encoder;
 
 use bytes::{BytesMut, BufMut};
 
+use mime::Mime;
+
 use errors::Error;
 use encode::{ToJson, to_writer, to_writer_pretty};
 
-pub struct JsonCodec<T> {
+use zipkin_core::MimeType;
+
+pub struct JsonCodec<T, E> {
     pub pretty_print: bool,
-    phantom: PhantomData<T>,
+    item: PhantomData<T>,
+    error: PhantomData<E>,
 }
 
-impl<T> JsonCodec<T> {
+impl<T, E> JsonCodec<T, E> {
     pub fn new() -> Self {
         JsonCodec {
             pretty_print: false,
-            phantom: PhantomData,
+            item: PhantomData,
+            error: PhantomData,
         }
     }
 
     pub fn pretty() -> Self {
         JsonCodec {
             pretty_print: false,
-            phantom: PhantomData,
+            item: PhantomData,
+            error: PhantomData,
         }
     }
 }
 
-impl<T> Encoder for JsonCodec<T>
-    where T: ToJson
+impl<T, E> Encoder for JsonCodec<T, E>
+    where T: ToJson,
+          E: From<::std::io::Error> + From<::serde_json::Error>
 {
     type Item = T;
-    type Error = Error;
+    type Error = E;
 
     fn encode(&mut self, item: Self::Item, dst: &mut BytesMut) -> Result<(), Self::Error> {
         let mut buf = dst.writer();
@@ -44,6 +52,12 @@ impl<T> Encoder for JsonCodec<T>
         }
 
         Ok(())
+    }
+}
+
+impl<T, E> MimeType for JsonCodec<T, E> {
+    fn mime_type(&self) -> Mime {
+        mime!(Application / Json)
     }
 }
 
@@ -61,21 +75,23 @@ mod tests {
     fn encoder() {
         let mut span = Span::new("test")
             .with_trace_id(TraceId {
-                lo: 123,
-                hi: Some(456),
-            })
+                               lo: 123,
+                               hi: Some(456),
+                           })
             .with_id(123)
             .with_parent_id(456)
             .with_debug(true);
-        let endpoint = Some(Arc::new(Endpoint {
-            name: Some("test"),
-            addr: Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080)),
-        }));
+        let endpoint =
+            Some(Arc::new(Endpoint {
+                              name: Some("test"),
+                              addr: Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+                                                         8080)),
+                          }));
 
         span.annotate(CLIENT_SEND, endpoint.clone());
         span.binary_annotate(HTTP_METHOD, "GET", endpoint.clone());
 
-        let mut codec = JsonCodec::new();
+        let mut codec = JsonCodec::<_, Error>::new();
         let mut buf = BytesMut::with_capacity(1024);
 
         codec.encode(span, &mut buf).unwrap();

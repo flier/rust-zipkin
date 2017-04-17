@@ -4,6 +4,9 @@ extern crate hyper;
 
 extern crate zipkin_core;
 
+pub use hyper::client::RedirectPolicy;
+pub use hyper::Error as HttpError;
+
 pub mod errors;
 mod transport;
 

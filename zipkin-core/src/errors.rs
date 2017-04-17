@@ -16,3 +16,6 @@ impl<T> From<::std::sync::PoisonError<T>> for Error {
         ErrorKind::PoisonError.into()
     }
 }
+
+unsafe impl Sync for Error {}
+unsafe impl Send for Error {}

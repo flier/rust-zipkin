@@ -1,9 +1,12 @@
+#![recursion_limit = "16384"]
+
 #[macro_use]
 extern crate error_chain;
 #[macro_use]
 extern crate log;
 extern crate pretty_env_logger;
 extern crate clap;
+extern crate url;
 #[macro_use]
 extern crate hyper;
 extern crate native_tls;
@@ -23,6 +26,8 @@ use std::thread;
 use std::marker::PhantomData;
 
 use clap::{Arg, App};
+
+use url::Url;
 
 use hyper::method::Method;
 use hyper::status::StatusCode;
@@ -51,14 +56,26 @@ error_chain!{
         EnvVarError(::std::env::VarError);
         ParseIntError(::std::num::ParseIntError);
         JsonError(::serde_json::Error);
+        UrlError(::url::ParseError);
         HyperError(::hyper::Error);
         TlsError(::native_tls::Error);
         TlsServerError(::hyper_native_tls::ServerError);
     }
+
+    links {
+        Zipkin(::zipkin::Error, ::zipkin::ErrorKind);
+        Core(::zipkin::core::Error, ::zipkin::core::ErrorKind);
+        Async(::zipkin::async::Error, ::zipkin::async::ErrorKind);
+        Json(::zipkin::json::Error, ::zipkin::json::ErrorKind);
+        Thrift(::zipkin::thrift::Error, ::zipkin::thrift::ErrorKind);
+        Kafka(::zipkin::kafka::Error, ::zipkin::kafka::ErrorKind);
+        Http(::zipkin::http::Error, ::zipkin::http::ErrorKind);
+    }
 }
 
 struct SimpleProxy<'a, S, C>
-    where S: zipkin::Sampler<Item = zipkin::Span<'a>>
+    where S: 'static + zipkin::Sampler<Item = zipkin::Span<'a>>,
+          C: 'static + zipkin::Collector<Item = zipkin::Span<'a>, Output = (), Error = zipkin::Error>
 {
     addr: String,
     proto: String,
@@ -67,7 +84,7 @@ struct SimpleProxy<'a, S, C>
 
 impl<'a, S, C> Handler for SimpleProxy<'a, S, C>
     where S: 'static + zipkin::Sampler<Item = zipkin::Span<'a>>,
-          C: 'static + zipkin::Collector<Item = zipkin::Span<'a>, Output = (), Error = Error>
+          C: 'static + zipkin::Collector<Item = zipkin::Span<'a>, Output = (), Error = zipkin::Error>
 {
     fn handle(&self, req: Request, mut res: Response) {
         debug!("request from {}: {} {} {}",
@@ -102,7 +119,7 @@ impl<'a, S, C> Handler for SimpleProxy<'a, S, C>
 
 impl<'a, S, C> SimpleProxy<'a, S, C>
     where S: 'static + zipkin::Sampler<Item = zipkin::Span<'a>>,
-          C: 'static + zipkin::Collector<Item = zipkin::Span<'a>, Output = (), Error = Error>
+          C: 'static + zipkin::Collector<Item = zipkin::Span<'a>, Output = (), Error = zipkin::Error>
 {
     fn serve_http_request(&self,
                           req: Request,
@@ -287,7 +304,9 @@ impl Pipe {
                      parent_id: zipkin::SpanId)
                      -> Result<()>
         where S: 'static + zipkin::Sampler<Item = zipkin::Span<'a>>,
-              C: 'static + zipkin::Collector<Item = zipkin::Span<'a>, Output = (), Error = Error>
+              C: 'static + zipkin::Collector<Item = zipkin::Span<'a>,
+                                   Output = (),
+                                   Error = zipkin::Error>
     {
         self.upstream.set_nodelay(true)?;
         self.client.set_nodelay(true)?;
@@ -322,7 +341,9 @@ impl Pipe {
                       to_upstream: bool)
                       -> Result<()>
         where S: 'static + zipkin::Sampler<Item = zipkin::Span<'a>>,
-              C: 'static + zipkin::Collector<Item = zipkin::Span<'a>, Output = (), Error = Error>
+              C: 'static + zipkin::Collector<Item = zipkin::Span<'a>,
+                                   Output = (),
+                                   Error = zipkin::Error>
     {
         let mut buf = [0; 4096];
 
@@ -337,7 +358,12 @@ impl Pipe {
 
                     to.shutdown(Shutdown::Write)?;
 
-                    annotate!(span, if to_upstream { zipkin::CLIENT_RECV } else { zipkin::SERVER_RECV });
+                    annotate!(span,
+                              if to_upstream {
+                                  zipkin::CLIENT_RECV
+                              } else {
+                                  zipkin::SERVER_RECV
+                              });
 
                     break;
                 }
@@ -345,13 +371,23 @@ impl Pipe {
                 Ok(read) => {
                     debug!("received {} bytes from {}", read, from.peer_addr()?);
 
-                    annotate!(span, if to_upstream { zipkin::CLIENT_RECV_FRAGMENT } else { zipkin::SERVER_RECV_FRAGMENT });
+                    annotate!(span,
+                              if to_upstream {
+                                  zipkin::CLIENT_RECV_FRAGMENT
+                              } else {
+                                  zipkin::SERVER_RECV_FRAGMENT
+                              });
 
                     match to.write(&buf[..read]) {
                         Ok(wrote) => {
                             debug!("sent {} bytes to {}", wrote, to.peer_addr()?);
 
-                            annotate!(span, if to_upstream { zipkin::CLIENT_SEND_FRAGMENT } else { zipkin::SERVER_SEND_FRAGMENT });
+                            annotate!(span,
+                                      if to_upstream {
+                                          zipkin::CLIENT_SEND_FRAGMENT
+                                      } else {
+                                          zipkin::SERVER_SEND_FRAGMENT
+                                      });
                         }
                         Err(err) => {
                             warn!("fail to send to {}, {}", to.peer_addr()?, err);
@@ -389,9 +425,9 @@ impl<'a> Default for DummyCollector<'a, zipkin::Span<'a>> {
 impl<'a> zipkin::Collector for DummyCollector<'a, zipkin::Span<'a>> {
     type Item = zipkin::Span<'a>;
     type Output = ();
-    type Error = Error;
+    type Error = zipkin::Error;
 
-    fn submit(&self, span: zipkin::Span<'a>) -> Result<()> {
+    fn submit(&self, span: zipkin::Span<'a>) -> zipkin::Result<()> {
         info!("{:?}", span);
 
         Ok(())
@@ -400,13 +436,16 @@ impl<'a> zipkin::Collector for DummyCollector<'a, zipkin::Span<'a>> {
 
 struct Config {
     addr: String,
-    threads: usize,
+    threads: Option<usize>,
     sample_rate: usize,
+    format: String,
+    collector_uri: Option<Url>,
 }
 
 fn parse_cmd_line() -> Result<Config> {
     let default_threads = num_cpus::get().to_string();
     let default_sample_rate = 1.to_string();
+    let default_format = "json";
 
     let opts = App::new(APP_NAME)
         .version(APP_VERSION)
@@ -432,13 +471,76 @@ fn parse_cmd_line() -> Result<Config> {
                  .takes_value(true)
                  .default_value(&default_sample_rate)
                  .help("Sample rate for span tracing"))
+        .arg(Arg::with_name("format")
+                 .short("f")
+                 .long("format")
+                 .value_name("FMT")
+                 .takes_value(true)
+                 .default_value(&default_format)
+                 .help("encode span in format"))
+        .arg(Arg::with_name("collector-uri")
+                 .short("u")
+                 .long("collector-uri")
+                 .value_name("URI")
+                 .takes_value(true)
+                 .help("Collector URI for tracing"))
         .get_matches();
 
     Ok(Config {
            addr: opts.value_of("listen").unwrap().to_owned(),
-           threads: opts.value_of("threads").unwrap().parse()?,
+           threads: {
+               let threads = opts.value_of("threads").unwrap().parse()?;
+
+               if threads > 1 { Some(threads) } else { None }
+           },
            sample_rate: opts.value_of("sample-rate").unwrap().parse()?,
+           format: opts.value_of("format").unwrap().to_owned(),
+           collector_uri: opts.value_of("collector-uri")
+               .and_then(|uri| Url::parse(uri).ok()),
        })
+}
+
+macro_rules! trace {
+    ($encoder:ident, $url:ident, $callback:expr) => {
+        match $encoder {
+            zipkin::MessageEncoder::Json::<zipkin::Span, zipkin::Error>(codec) |
+            zipkin::MessageEncoder::PrettyJson::<zipkin::Span, zipkin::Error>(codec) => {
+                trace_with_encoder!(codec, $url, $callback)
+            },
+            zipkin::MessageEncoder::Thrift::<zipkin::Span, zipkin::Error>(codec) => {
+                trace_with_encoder!(codec, $url, $callback)
+            },
+        }
+    };
+}
+
+macro_rules! trace_with_encoder {
+    ($encoder:ident, $url:ident, $callback:expr) => {
+        if let Some(url) = $url {
+            match url.scheme() {
+                "kafka" => {
+                    let hosts = vec![url.host_str().unwrap().to_owned()];
+                    let config = zipkin::kafka::Config::new(hosts.as_slice());
+                    let transport = zipkin::kafka::Transport::new(config).unwrap();
+                    let collector = zipkin::BaseCollector::new($encoder, transport);
+
+                    $callback(collector);
+                }
+                "http" => {
+                    let config = zipkin::http::Config::new($encoder.mime_type());
+                    let transport = zipkin::http::Transport::new(url.as_str(), config).unwrap();
+                    let collector = zipkin::BaseCollector::new($encoder, transport);
+
+                    $callback(collector);
+                }
+                _ => panic!("unknown collector type: {}", url.scheme())
+            }
+        } else {
+            let collector = DummyCollector::default();
+
+            $callback(collector);
+        }
+    }
 }
 
 fn main() {
@@ -448,24 +550,36 @@ fn main() {
 
     info!("listening on {}", cfg.addr);
 
-    let tracer = Arc::new(zipkin::Tracer::with_sampler(zipkin::FixedRate::new(cfg.sample_rate),
-                                                       DummyCollector::default()));
+    let codec = cfg.format.parse().unwrap();
+    let uri = cfg.collector_uri.as_ref();
 
-    let proxy = SimpleProxy {
-        addr: cfg.addr.clone(),
-        proto: "http".to_owned(),
-        tracer: tracer,
-    };
+    let server = Server::http(&cfg.addr).unwrap();
 
-    let server = Server::http(cfg.addr.clone()).unwrap();
+    let sample_rate = cfg.sample_rate;
+    let addr = cfg.addr;
+    let threads = cfg.threads;
 
-    if cfg.threads > 1 {
-        info!("starting {} v{} with {} threads to handle requests", APP_NAME, APP_VERSION, cfg.threads);
+    trace!(codec, uri, |collector| {
+        let tracer = Arc::new(zipkin::Tracer::with_sampler(zipkin::FixedRate::new(sample_rate),
+                                                           collector));
 
-        server.handle_threads(proxy, cfg.threads).unwrap();
-    } else {
-        info!("starting {} v{} to handle requests", APP_NAME, APP_VERSION);
+        let proxy = SimpleProxy {
+            addr: addr,
+            proto: "http".to_owned(),
+            tracer: tracer,
+        };
 
-        server.handle(proxy).unwrap();
-    }
+        if let Some(threads) = threads {
+            info!("starting {} v{} with {} threads to handle requests",
+                  APP_NAME,
+                  APP_VERSION,
+                  threads);
+
+            server.handle_threads(proxy, threads).unwrap();
+        } else {
+            info!("starting {} v{} to handle requests", APP_NAME, APP_VERSION);
+
+            server.handle(proxy).unwrap();
+        }
+    });
 }

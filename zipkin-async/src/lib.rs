@@ -10,4 +10,5 @@ extern crate zipkin_core;
 pub mod errors;
 mod collector;
 
+pub use errors::{Error, ErrorKind, Result};
 pub use collector::{AsyncCollector, BaseAsyncCollector};

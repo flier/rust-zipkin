@@ -1,4 +1,5 @@
 use std::time::Duration;
+use std::marker::PhantomData;
 
 use kafka::producer::{Producer, Record, Compression, RequiredAcks};
 
@@ -30,12 +31,22 @@ impl Default for KafkaConfig {
     }
 }
 
-pub struct KafkaTransport {
-    producer: Producer,
-    topic: String,
+impl KafkaConfig {
+    pub fn new(hosts: &[String]) -> Self {
+        KafkaConfig {
+            hosts: hosts.to_vec(),
+            ..Default::default()
+        }
+    }
 }
 
-impl KafkaTransport {
+pub struct KafkaTransport<E> {
+    producer: Producer,
+    topic: String,
+    phantom: PhantomData<E>,
+}
+
+impl<E> KafkaTransport<E> {
     pub fn new(config: KafkaConfig) -> Result<Self> {
         let producer = Producer::from_hosts(config.hosts)
             .with_compression(config.compression)
@@ -47,15 +58,18 @@ impl KafkaTransport {
         Ok(KafkaTransport {
                producer: producer,
                topic: config.topic,
+               phantom: PhantomData,
            })
     }
 }
 
-impl<B: AsRef<[u8]>> Transport<B> for KafkaTransport {
+impl<B: AsRef<[u8]>, E> Transport<B> for KafkaTransport<E>
+    where E: 'static + From<::kafka::Error> + Send
+{
     type Output = ();
-    type Error = Error;
+    type Error = E;
 
-    fn send(&mut self, buf: &B) -> Result<()> {
+    fn send(&mut self, buf: &B) -> ::std::result::Result<(), Self::Error> {
         let record = Record::from_key_value(&self.topic, (), buf.as_ref());
 
         self.producer.send(&record)?;

@@ -1,11 +1,16 @@
 use std::sync::Mutex;
+use std::marker::PhantomData;
 
 use bytes::BytesMut;
 
 use tokio_io::codec::Encoder;
+use mime::Mime;
 
 use span::Span;
-use errors::Error;
+
+pub trait MimeType {
+    fn mime_type(&self) -> Mime;
+}
 
 pub trait Transport<B: AsRef<[u8]>>
     where Self: 'static + Send
@@ -24,32 +29,45 @@ pub trait Collector: Sync + Send {
     fn submit(&self, item: Self::Item) -> Result<Self::Output, Self::Error>;
 }
 
-pub struct BaseCollector<E, T> {
+pub struct BaseCollector<C, T, E> {
     pub max_message_size: usize,
-    pub encoder: Mutex<E>,
+    pub encoder: Mutex<C>,
     pub transport: Mutex<T>,
+    phantom: PhantomData<E>,
 }
 
-impl<'a, E, T> Collector for BaseCollector<E, T>
-    where E: Encoder<Item = Span<'a>, Error = Error> + Sync + Send,
-          T: Transport<BytesMut, Error = Error>
+impl<C, T, E> BaseCollector<C, T, E> {
+    pub fn new(encoder: C, transport: T) -> Self {
+        BaseCollector {
+            max_message_size: 0,
+            encoder: Mutex::new(encoder),
+            transport: Mutex::new(transport),
+            phantom: PhantomData,
+        }
+    }
+}
+
+impl<'a, C, T, E> Collector for BaseCollector<C, T, E>
+    where C: Encoder<Item = Span<'a>, Error = E> + Sync + Send,
+          T: Transport<BytesMut, Error = E>,
+          E: From<::std::io::Error> + Sync + Send
 {
     type Item = Span<'a>;
     type Output = ();
-    type Error = Error;
+    type Error = E;
 
     fn submit(&self, span: Span<'a>) -> Result<Self::Output, Self::Error> {
         let mut buf = BytesMut::with_capacity(self.max_message_size);
         {
-            let mut encoder = self.encoder.lock()?;
-
-            encoder.encode(span, &mut buf)?
+            if let Ok(mut encoder) = self.encoder.lock() {
+                encoder.encode(span, &mut buf)?
+            }
         }
 
         {
-            let mut transport = self.transport.lock()?;
-
-            transport.send(&buf)?;
+            if let Ok(mut transport) = self.transport.lock() {
+                transport.send(&buf)?;
+            }
         }
 
         Ok(())
@@ -130,6 +148,7 @@ mod tests {
             max_message_size: 1024,
             encoder: Mutex::new(MockEncoder::new()),
             transport: Mutex::new(MockTransport::new()),
+            phantom: PhantomData,
         };
 
         collector.submit(span).unwrap();
