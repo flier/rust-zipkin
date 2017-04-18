@@ -2,10 +2,6 @@
 
 #[macro_use]
 extern crate error_chain;
-extern crate url;
-extern crate bytes;
-extern crate tokio_io;
-extern crate mime;
 
 extern crate zipkin_core;
 
@@ -33,9 +29,6 @@ pub mod collector {
 
 pub mod errors;
 pub use errors::{Error, ErrorKind, Result};
-
-mod builder;
-pub use builder::{MessageEncoder, CollectorBuilder};
 
 // hack for #[macro_reexport] feature
 //

@@ -20,7 +20,7 @@ extern crate num_cpus;
 extern crate zipkin;
 
 use std::io::prelude::*;
-use std::net::{TcpStream, Shutdown};
+use std::net::{TcpStream, Shutdown, ToSocketAddrs};
 use std::sync::Arc;
 use std::thread;
 use std::marker::PhantomData;
@@ -445,7 +445,7 @@ struct Config {
 fn parse_cmd_line() -> Result<Config> {
     let default_threads = num_cpus::get().to_string();
     let default_sample_rate = 1.to_string();
-    let default_format = "json";
+    let default_format = "pretty_json";
 
     let opts = App::new(APP_NAME)
         .version(APP_VERSION)
@@ -477,7 +477,7 @@ fn parse_cmd_line() -> Result<Config> {
                  .value_name("FMT")
                  .takes_value(true)
                  .default_value(&default_format)
-                 .help("encode span in format"))
+                 .help("encode span in format (json, pretty_json, thrift)"))
         .arg(Arg::with_name("collector-uri")
                  .short("u")
                  .long("collector-uri")
@@ -506,7 +506,7 @@ macro_rules! trace {
             "json" => {
                 trace_with_encoder!(zipkin::codec::json(), $url, $callback)
             }
-            "pretty" => {
+            "pretty" |"pretty_json" => {
                 trace_with_encoder!(zipkin::codec::pretty_json(), $url, $callback)
             },
             "thrift" => {
@@ -522,9 +522,15 @@ macro_rules! trace_with_encoder {
         if let Some(url) = $url {
             match url.scheme() {
                 "kafka" => {
-                    let hosts = vec![url.host_str().unwrap().to_owned()];
+                    let addr = url.with_default_port(|_| Ok(9092))
+                                  .unwrap()
+                                  .to_socket_addrs()
+                                  .unwrap()
+                                  .next()
+                                  .unwrap()
+                                  .to_string();
                     let topic = url.fragment().unwrap_or("zipkin");
-                    let config = zipkin::kafka::Config::new(&hosts[..], topic);
+                    let config = zipkin::kafka::Config::new(&[addr], topic);
                     let transport = zipkin::kafka::Transport::new(config).unwrap();
                     let collector = zipkin::collector::new($encoder, transport);
 
