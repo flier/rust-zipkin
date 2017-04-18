@@ -1,3 +1,5 @@
+use std::rc::Rc;
+use std::cell::RefCell;
 use std::marker::PhantomData;
 
 use tokio_io::codec::Encoder;
@@ -6,10 +8,13 @@ use bytes::{BytesMut, BufMut};
 
 use mime::Mime;
 
+use thrift::protocol::{TListIdentifier, TType, TOutputProtocol, TBinaryOutputProtocol};
+use thrift::transport::{TBufferTransport, TPassThruTransport};
+
 use errors::Error;
 use encode::{ToThrift, to_writer};
 
-use zipkin_core::MimeType;
+use zipkin_core::{BatchEncoder, MimeType};
 
 pub struct ThriftCodec<T, E> {
     item: PhantomData<T>,
@@ -37,6 +42,44 @@ impl<T, E> Encoder for ThriftCodec<T, E>
 
         to_writer(&mut buf, &item)?;
 
+        Ok(())
+    }
+}
+
+impl<T, E> BatchEncoder for ThriftCodec<T, E>
+    where T: ToThrift,
+          E: From<::std::io::Error> + From<::thrift::Error> + From<Error>
+{
+    fn batch_begin(&mut self, count: usize, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        let buf = Rc::new(RefCell::new(Box::new(TBufferTransport::with_capacity(4, 4))));
+        let mut proto =
+            TBinaryOutputProtocol::new(Rc::new(RefCell::new(Box::new(TPassThruTransport {
+                                                                         inner: buf.clone(),
+                                                                     }))),
+                                       true);
+        proto
+            .write_list_begin(&TListIdentifier::new(TType::Struct, count as i32))?;
+        dst.put_slice(buf.borrow().read_buffer());
+        Ok(())
+    }
+
+    fn batch_encode(&mut self, item: &[Self::Item], dst: &mut BytesMut) -> Result<(), Self::Error> {
+        let mut buf = dst.writer();
+
+        to_writer(&mut buf, &item)?;
+
+        Ok(())
+    }
+
+    fn batch_end(&mut self, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        let buf = Rc::new(RefCell::new(Box::new(TBufferTransport::with_capacity(4, 4))));
+        let mut proto =
+            TBinaryOutputProtocol::new(Rc::new(RefCell::new(Box::new(TPassThruTransport {
+                                                                         inner: buf.clone(),
+                                                                     }))),
+                                       true);
+        proto.write_list_end()?;
+        dst.put_slice(buf.borrow().read_buffer());
         Ok(())
     }
 }

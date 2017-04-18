@@ -5,7 +5,7 @@ use kafka::producer::{Producer, Record, Compression, RequiredAcks};
 
 use zipkin_core::Transport;
 
-use errors::{Error, Result};
+use errors::Result;
 
 pub struct KafkaConfig {
     pub hosts: Vec<String>,

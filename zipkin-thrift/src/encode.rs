@@ -144,8 +144,8 @@ impl<'a> ToThrift for zipkin::Span<'a> {
             name: Some(self.name.into()),
             id: Some(self.id as i64),
             parent_id: self.parent_id.map(|id| id as i64),
-            annotations: self.annotations.to_thrift(),
-            binary_annotations: self.binary_annotations.to_thrift(),
+            annotations: self.annotations.as_slice().to_thrift(),
+            binary_annotations: self.binary_annotations.as_slice().to_thrift(),
             debug: self.debug,
             timestamp: Some(self.timestamp.to_i64()),
             duration: self.duration.map(|d| d.to_i64()),
@@ -173,7 +173,7 @@ impl<'a, T: ToThrift, D: Deref<Target = T>> ToThrift for Option<D> {
     }
 }
 
-impl<'a, T: ToThrift> ToThrift for [T] {
+impl<'a, T: ToThrift> ToThrift for &'a [T] {
     type Output = Option<Vec<T::Output>>;
 
     fn to_thrift(&self) -> Self::Output {
@@ -190,7 +190,7 @@ impl<'a, T: ToThrift> ToThrift for [T] {
         proto
             .write_list_begin(&TListIdentifier::new(TType::Struct, self.len() as i32))?;
 
-        for item in self {
+        for item in self.iter() {
             item.write_to(proto)?;
         }
 

@@ -156,7 +156,7 @@ impl<'a> ToJson for Span<'a> {
     }
 }
 
-impl<'a, T: ToJson> ToJson for [T] {
+impl<'a, T: ToJson> ToJson for &'a [T] {
     fn to_json(&self) -> Value {
         self.iter()
             .map(|item| item.to_json())

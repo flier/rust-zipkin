@@ -19,4 +19,4 @@ pub use span::{TraceId, SpanId, Timestamp, timestamp, now, ToMicrosecond, Durati
                Annotation, Value, BinaryAnnotation, BinaryAnnotationValue, Annotatable, Span};
 pub use sampler::{Sampler, FixedRate, RateLimit};
 pub use tracer::Tracer;
-pub use collector::{MimeType, Transport, Collector, BaseCollector};
+pub use collector::{BatchEncoder, MimeType, Transport, Collector, BaseCollector};

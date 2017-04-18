@@ -8,6 +8,14 @@ use mime::Mime;
 
 use span::Span;
 
+pub trait BatchEncoder: Encoder {
+    fn batch_encode(&mut self, item: &[Self::Item], dst: &mut BytesMut) -> Result<(), Self::Error>;
+
+    fn batch_begin(&mut self, count: usize, dst: &mut BytesMut) -> Result<(), Self::Error>;
+
+    fn batch_end(&mut self, dst: &mut BytesMut) -> Result<(), Self::Error>;
+}
+
 pub trait MimeType {
     fn mime_type(&self) -> Mime;
 }
@@ -39,7 +47,7 @@ pub struct BaseCollector<C, T, E> {
 impl<C, T, E> BaseCollector<C, T, E> {
     pub fn new(encoder: C, transport: T) -> Self {
         BaseCollector {
-            max_message_size: 0,
+            max_message_size: 4096,
             encoder: Mutex::new(encoder),
             transport: Mutex::new(transport),
             phantom: PhantomData,
