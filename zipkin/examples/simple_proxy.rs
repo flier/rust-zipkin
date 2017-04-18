@@ -75,7 +75,7 @@ error_chain!{
 
 struct SimpleProxy<'a, S, C>
     where S: 'static + zipkin::Sampler<Item = zipkin::Span<'a>>,
-          C: 'static + zipkin::Collector<Item = zipkin::Span<'a>, Output = (), Error = zipkin::Error>
+          C: 'static + zipkin::Collector<Item = Vec<zipkin::Span<'a>>, Output = (), Error = zipkin::Error>
 {
     addr: String,
     proto: String,
@@ -84,7 +84,7 @@ struct SimpleProxy<'a, S, C>
 
 impl<'a, S, C> Handler for SimpleProxy<'a, S, C>
     where S: 'static + zipkin::Sampler<Item = zipkin::Span<'a>>,
-          C: 'static + zipkin::Collector<Item = zipkin::Span<'a>, Output = (), Error = zipkin::Error>
+          C: 'static + zipkin::Collector<Item = Vec<zipkin::Span<'a>>, Output = (), Error = zipkin::Error>
 {
     fn handle(&self, req: Request, mut res: Response) {
         debug!("request from {}: {} {} {}",
@@ -119,7 +119,7 @@ impl<'a, S, C> Handler for SimpleProxy<'a, S, C>
 
 impl<'a, S, C> SimpleProxy<'a, S, C>
     where S: 'static + zipkin::Sampler<Item = zipkin::Span<'a>>,
-          C: 'static + zipkin::Collector<Item = zipkin::Span<'a>, Output = (), Error = zipkin::Error>
+          C: 'static + zipkin::Collector<Item = Vec<zipkin::Span<'a>>, Output = (), Error = zipkin::Error>
 {
     fn serve_http_request(&self,
                           req: Request,
@@ -304,7 +304,7 @@ impl Pipe {
                      parent_id: zipkin::SpanId)
                      -> Result<()>
         where S: 'static + zipkin::Sampler<Item = zipkin::Span<'a>>,
-              C: 'static + zipkin::Collector<Item = zipkin::Span<'a>,
+              C: 'static + zipkin::Collector<Item = Vec<zipkin::Span<'a>>,
                                    Output = (),
                                    Error = zipkin::Error>
     {
@@ -341,7 +341,7 @@ impl Pipe {
                       to_upstream: bool)
                       -> Result<()>
         where S: 'static + zipkin::Sampler<Item = zipkin::Span<'a>>,
-              C: 'static + zipkin::Collector<Item = zipkin::Span<'a>,
+              C: 'static + zipkin::Collector<Item = Vec<zipkin::Span<'a>>,
                                    Output = (),
                                    Error = zipkin::Error>
     {
@@ -416,19 +416,19 @@ struct DummyCollector<'a, T: 'a>(PhantomData<&'a T>);
 unsafe impl<'a, T> Sync for DummyCollector<'a, T> {}
 unsafe impl<'a, T> Send for DummyCollector<'a, T> {}
 
-impl<'a> Default for DummyCollector<'a, zipkin::Span<'a>> {
+impl<'a> Default for DummyCollector<'a, Vec<zipkin::Span<'a>>> {
     fn default() -> Self {
         DummyCollector(PhantomData)
     }
 }
 
-impl<'a> zipkin::Collector for DummyCollector<'a, zipkin::Span<'a>> {
-    type Item = zipkin::Span<'a>;
+impl<'a: 'b, 'b> zipkin::Collector for DummyCollector<'a, Vec<zipkin::Span<'a>>> {
+    type Item = Vec<zipkin::Span<'a>>;
     type Output = ();
     type Error = zipkin::Error;
 
-    fn submit(&self, span: zipkin::Span<'a>) -> zipkin::Result<()> {
-        info!("{:?}", span);
+    fn submit(&self, spans: Self::Item) -> zipkin::Result<()> {
+        info!("{:?}", spans);
 
         Ok(())
     }
@@ -504,12 +504,18 @@ macro_rules! trace {
     ($format:expr, $url:ident, $callback:expr) => {
         match $format {
             "json" => {
+                info!("use JSON encoder");
+
                 trace_with_encoder!(zipkin::codec::json(), $url, $callback)
             }
             "pretty" |"pretty_json" => {
+                info!("use pretty JSON encoder");
+
                 trace_with_encoder!(zipkin::codec::pretty_json(), $url, $callback)
             },
             "thrift" => {
+                info!("use thrift encoder");
+
                 trace_with_encoder!(zipkin::codec::thrift(), $url, $callback)
             },
             _ => panic!("unknown message format: {}", $format)

@@ -4,6 +4,8 @@ version = "0.1.0"
 authors = ["Flier Lu <flier.lu@gmail.com>"]
 
 [dependencies]
+log = "0.3"
+hexplay = "0.1"
 error-chain = "0.10"
 time = "0.1"
 rand = "0.3"

@@ -64,17 +64,17 @@ pub mod codec {
     use super::{Span, Error};
 
     #[cfg(any(feature = "json", feature = "doc"))]
-    pub fn json<'a>() -> super::json::Codec<Span<'a>, Error> {
+    pub fn json<'a>() -> super::json::Codec<Vec<Span<'a>>, Error> {
         super::json::Codec::new()
     }
 
     #[cfg(any(feature = "json", feature = "doc"))]
-    pub fn pretty_json<'a>() -> super::json::Codec<Span<'a>, Error> {
+    pub fn pretty_json<'a>() -> super::json::Codec<Vec<Span<'a>>, Error> {
         super::json::Codec::pretty()
     }
 
     #[cfg(any(feature = "thrift", feature = "doc"))]
-    pub fn thrift<'a>() -> super::thrift::Codec<Span<'a>, Error> {
+    pub fn thrift<'a>() -> super::thrift::Codec<Vec<Span<'a>>, Error> {
         super::thrift::Codec::new()
     }
 }

@@ -25,8 +25,7 @@ impl<'a, S, C> Tracer<S, C> {
 }
 
 impl<'a, S, C> Tracer<S, C>
-    where S: Sampler<Item = Span<'a>>,
-          C: Collector<Item = Span<'a>>
+    where S: Sampler<Item = Span<'a>>
 {
     pub fn span(&self, name: &'a str) -> Span<'a> {
         let span = Span::new(name);
@@ -39,13 +38,17 @@ impl<'a, S, C> Tracer<S, C>
             ..span
         }
     }
+}
 
+impl<'a, S, C> Tracer<S, C>
+    where C: Collector<Item = Vec<Span<'a>>>
+{
     pub fn submit(&self,
                   mut span: Span<'a>)
                   -> Result<<C as Collector>::Output, <C as Collector>::Error> {
         span.duration = Some(now() - span.timestamp);
 
-        self.collector.submit(span)
+        self.collector.submit(vec![span])
     }
 }
 

@@ -165,6 +165,16 @@ impl<'a, T: ToJson> ToJson for &'a [T] {
     }
 }
 
+impl<T: ToJson> ToJson for Vec<T> {
+    fn to_json(&self) -> Value {
+        self.as_slice()
+            .iter()
+            .map(|item| item.to_json())
+            .collect::<Vec<Value>>()
+            .into()
+    }
+}
+
 pub fn to_json<T: ToJson>(value: &T) -> Value {
     value.to_json()
 }

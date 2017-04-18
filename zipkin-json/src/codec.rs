@@ -8,7 +8,7 @@ use mime::Mime;
 
 use encode::{ToJson, to_writer, to_writer_pretty};
 
-use zipkin_core::{BatchEncoder, MimeType};
+use zipkin_core::MimeType;
 
 pub struct JsonCodec<T, E> {
     pub pretty_print: bool,
@@ -27,7 +27,7 @@ impl<T, E> JsonCodec<T, E> {
 
     pub fn pretty() -> Self {
         JsonCodec {
-            pretty_print: false,
+            pretty_print: true,
             item: PhantomData,
             error: PhantomData,
         }
@@ -54,36 +54,6 @@ impl<T, E> Encoder for JsonCodec<T, E>
     }
 }
 
-impl<T, E> BatchEncoder for JsonCodec<T, E>
-    where T: ToJson,
-          E: From<::std::io::Error> + From<::serde_json::Error>
-{
-    fn batch_begin(&mut self, _: usize, dst: &mut BytesMut) -> Result<(), Self::Error> {
-        dst.put(b'[');
-        Ok(())
-    }
-
-    fn batch_end(&mut self, dst: &mut BytesMut) -> Result<(), Self::Error> {
-        dst.put(b']');
-        Ok(())
-    }
-
-    fn batch_encode(&mut self,
-                    items: &[Self::Item],
-                    dst: &mut BytesMut)
-                    -> Result<(), Self::Error> {
-        let mut buf = dst.writer();
-
-        if self.pretty_print {
-            to_writer_pretty(&mut buf, &items)?;
-        } else {
-            to_writer(&mut buf, &items)?;
-        }
-
-        Ok(())
-    }
-}
-
 impl<T, E> MimeType for JsonCodec<T, E> {
     fn mime_type(&self) -> Mime {
         mime!(Application / Json)
@@ -99,6 +69,7 @@ mod tests {
     use zipkin_core::*;
 
     use super::*;
+    use super::super::errors::Error;
 
     #[test]
     fn encoder() {

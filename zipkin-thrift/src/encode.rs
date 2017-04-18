@@ -198,6 +198,34 @@ impl<'a, T: ToThrift> ToThrift for &'a [T] {
     }
 }
 
+
+impl<T: ToThrift> ToThrift for Vec<T> {
+    type Output = Option<Vec<T::Output>>;
+
+    fn to_thrift(&self) -> Self::Output {
+        let s = self.as_slice();
+        if s.is_empty() {
+            None
+        } else {
+            Some(s.iter()
+                     .map(|item| item.to_thrift())
+                     .collect::<Vec<T::Output>>())
+        }
+    }
+
+    fn write_to(&self, proto: &mut TOutputProtocol) -> thrift::Result<()> {
+        let s = self.as_slice();
+        proto
+            .write_list_begin(&TListIdentifier::new(TType::Struct, s.len() as i32))?;
+
+        for item in s.iter() {
+            item.write_to(proto)?;
+        }
+
+        proto.write_list_end()
+    }
+}
+
 pub fn to_thrift<T: ToThrift>(value: &T) -> T::Output {
     value.to_thrift()
 }

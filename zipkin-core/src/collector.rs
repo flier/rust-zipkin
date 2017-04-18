@@ -1,20 +1,15 @@
+use std::str;
 use std::sync::Mutex;
 use std::marker::PhantomData;
 
 use bytes::BytesMut;
 
+use hexplay::HexViewBuilder;
+
 use tokio_io::codec::Encoder;
 use mime::Mime;
 
 use span::Span;
-
-pub trait BatchEncoder: Encoder {
-    fn batch_encode(&mut self, item: &[Self::Item], dst: &mut BytesMut) -> Result<(), Self::Error>;
-
-    fn batch_begin(&mut self, count: usize, dst: &mut BytesMut) -> Result<(), Self::Error>;
-
-    fn batch_end(&mut self, dst: &mut BytesMut) -> Result<(), Self::Error>;
-}
 
 pub trait MimeType {
     fn mime_type(&self) -> Mime;
@@ -55,20 +50,30 @@ impl<C, T, E> BaseCollector<C, T, E> {
     }
 }
 
-impl<'a, C, T, E> Collector for BaseCollector<C, T, E>
-    where C: Encoder<Item = Span<'a>, Error = E> + Sync + Send,
+impl<'a: 'b, 'b, C, T, E> Collector for BaseCollector<C, T, E>
+    where C: Encoder<Item = Vec<Span<'a>>, Error = E> + Sync + Send,
           T: Transport<BytesMut, Error = E>,
           E: From<::std::io::Error> + Sync + Send
 {
-    type Item = Span<'a>;
+    type Item = Vec<Span<'a>>;
     type Output = ();
     type Error = E;
 
-    fn submit(&self, span: Span<'a>) -> Result<Self::Output, Self::Error> {
+    fn submit(&self, spans: Self::Item) -> Result<Self::Output, Self::Error> {
         let mut buf = BytesMut::with_capacity(self.max_message_size);
         {
             if let Ok(mut encoder) = self.encoder.lock() {
-                encoder.encode(span, &mut buf)?
+                let count = spans.len();
+
+                encoder.encode(spans, &mut buf)?;
+
+                debug!("encoded {} spans:\n{}",
+                       count,
+                       if buf[0] == b'[' {
+                           String::from_utf8(buf.to_vec()).unwrap()
+                       } else {
+                           HexViewBuilder::new(&buf[..]).finish().to_string()
+                       });
             }
         }
 
@@ -91,6 +96,7 @@ mod tests {
 
     use tokio_io::codec::Encoder;
 
+    use super::Collector;
     use super::super::*;
     use super::super::errors::Error;
 
@@ -134,8 +140,8 @@ mod tests {
         }
     }
 
-    impl<'a> Encoder for MockEncoder<'a, Span<'a>> {
-        type Item = Span<'a>;
+    impl<'a> Encoder for MockEncoder<'a, Vec<Span<'a>>> {
+        type Item = Vec<Span<'a>>;
         type Error = Error;
 
         fn encode(&mut self, _: Self::Item, buf: &mut BytesMut) -> Result<(), Self::Error> {
@@ -159,7 +165,7 @@ mod tests {
             phantom: PhantomData,
         };
 
-        collector.submit(span).unwrap();
+        collector.submit(vec![span]).unwrap();
 
         assert_eq!(collector.encoder.lock().unwrap().encoded, 1);
         assert_eq!(collector.transport.lock().unwrap().sent, 1);
