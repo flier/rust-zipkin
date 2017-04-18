@@ -23,6 +23,14 @@ pub mod prelude {
     pub use core::{Annotatable, BinaryAnnotationValue, MimeType};
 }
 
+pub mod collector {
+    use zipkin_core;
+
+    pub fn new<C, T, E>(encoder: C, transport: T) -> zipkin_core::BaseCollector<C, T, E> {
+        zipkin_core::BaseCollector::new(encoder, transport)
+    }
+}
+
 pub mod errors;
 pub use errors::{Error, ErrorKind, Result};
 
@@ -60,23 +68,21 @@ pub mod thrift {
 }
 
 pub mod codec {
+    use super::{Span, Error};
+
     #[cfg(any(feature = "json", feature = "doc"))]
-    pub use zipkin_json::JsonCodec;
-    #[cfg(any(feature = "json", feature = "doc"))]
-    pub fn json<T, E>() -> JsonCodec<T, E> {
-        JsonCodec::new()
+    pub fn json<'a>() -> super::json::Codec<Span<'a>, Error> {
+        super::json::Codec::new()
     }
+
     #[cfg(any(feature = "json", feature = "doc"))]
-    pub fn pretty_json<T, E>() -> JsonCodec<T, E> {
-        JsonCodec::pretty()
+    pub fn pretty_json<'a>() -> super::json::Codec<Span<'a>, Error> {
+        super::json::Codec::pretty()
     }
 
     #[cfg(any(feature = "thrift", feature = "doc"))]
-    pub use zipkin_thrift::ThriftCodec;
-
-    #[cfg(any(feature = "thrift", feature = "doc"))]
-    pub fn thrift<T, E>() -> ThriftCodec<T, E> {
-        ThriftCodec::new()
+    pub fn thrift<'a>() -> super::thrift::Codec<Span<'a>, Error> {
+        super::thrift::Codec::new()
     }
 }
 

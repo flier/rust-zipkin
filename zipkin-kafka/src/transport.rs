@@ -32,9 +32,10 @@ impl Default for KafkaConfig {
 }
 
 impl KafkaConfig {
-    pub fn new(hosts: &[String]) -> Self {
+    pub fn new(hosts: &[String], topic: &str) -> Self {
         KafkaConfig {
             hosts: hosts.to_vec(),
+            topic: topic.to_owned(),
             ..Default::default()
         }
     }

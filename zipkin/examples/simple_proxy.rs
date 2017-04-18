@@ -501,35 +501,39 @@ fn parse_cmd_line() -> Result<Config> {
 }
 
 macro_rules! trace {
-    ($encoder:ident, $url:ident, $callback:expr) => {
-        match $encoder {
-            zipkin::MessageEncoder::Json::<zipkin::Span, zipkin::Error>(codec) |
-            zipkin::MessageEncoder::PrettyJson::<zipkin::Span, zipkin::Error>(codec) => {
-                trace_with_encoder!(codec, $url, $callback)
+    ($format:expr, $url:ident, $callback:expr) => {
+        match $format {
+            "json" => {
+                trace_with_encoder!(zipkin::codec::json(), $url, $callback)
+            }
+            "pretty" => {
+                trace_with_encoder!(zipkin::codec::pretty_json(), $url, $callback)
             },
-            zipkin::MessageEncoder::Thrift::<zipkin::Span, zipkin::Error>(codec) => {
-                trace_with_encoder!(codec, $url, $callback)
+            "thrift" => {
+                trace_with_encoder!(zipkin::codec::thrift(), $url, $callback)
             },
+            _ => panic!("unknown message format: {}", $format)
         }
     };
 }
 
 macro_rules! trace_with_encoder {
-    ($encoder:ident, $url:ident, $callback:expr) => {
+    ($encoder:expr, $url:ident, $callback:expr) => {
         if let Some(url) = $url {
             match url.scheme() {
                 "kafka" => {
                     let hosts = vec![url.host_str().unwrap().to_owned()];
-                    let config = zipkin::kafka::Config::new(hosts.as_slice());
+                    let topic = url.fragment().unwrap_or("zipkin");
+                    let config = zipkin::kafka::Config::new(&hosts[..], topic);
                     let transport = zipkin::kafka::Transport::new(config).unwrap();
-                    let collector = zipkin::BaseCollector::new($encoder, transport);
+                    let collector = zipkin::collector::new($encoder, transport);
 
                     $callback(collector);
                 }
                 "http" => {
                     let config = zipkin::http::Config::new($encoder.mime_type());
                     let transport = zipkin::http::Transport::new(url.as_str(), config).unwrap();
-                    let collector = zipkin::BaseCollector::new($encoder, transport);
+                    let collector = zipkin::collector::new($encoder, transport);
 
                     $callback(collector);
                 }
@@ -548,20 +552,19 @@ fn main() {
 
     let cfg = parse_cmd_line().unwrap();
 
-    info!("listening on {}", cfg.addr);
-
-    let codec = cfg.format.parse().unwrap();
+    let format = cfg.format.as_str();
     let uri = cfg.collector_uri.as_ref();
 
-    let server = Server::http(&cfg.addr).unwrap();
-
-    let sample_rate = cfg.sample_rate;
+    let sampler = zipkin::FixedRate::new(cfg.sample_rate);
     let addr = cfg.addr;
     let threads = cfg.threads;
 
-    trace!(codec, uri, |collector| {
-        let tracer = Arc::new(zipkin::Tracer::with_sampler(zipkin::FixedRate::new(sample_rate),
-                                                           collector));
+    trace!(format, uri, |collector| {
+        let tracer = Arc::new(zipkin::Tracer::with_sampler(sampler, collector));
+
+        let server = Server::http(&addr).unwrap();
+
+        info!("listening on {}", addr);
 
         let proxy = SimpleProxy {
             addr: addr,
