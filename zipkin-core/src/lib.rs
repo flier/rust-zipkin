@@ -3,6 +3,8 @@ extern crate log;
 extern crate hexplay;
 #[macro_use]
 extern crate error_chain;
+#[macro_use]
+extern crate lazy_static;
 extern crate time;
 extern crate rand;
 extern crate xoroshiro128;

@@ -1,4 +1,5 @@
 use std::str;
+use std::char;
 use std::sync::Mutex;
 use std::marker::PhantomData;
 
@@ -10,6 +11,16 @@ use tokio_io::codec::Encoder;
 use mime::Mime;
 
 use span::Span;
+
+lazy_static! {
+    static ref CODEPAGE_HEX: Vec<char> = (0_u32..256)
+        .map(|c| if 0x20 <= c && c <= 0x7E {
+                char::from_u32(c).unwrap()
+            } else {
+                '.'
+            })
+        .collect();
+}
 
 pub trait MimeType {
     fn mime_type(&self) -> Mime;
@@ -72,7 +83,10 @@ impl<'a: 'b, 'b, C, T, E> Collector for BaseCollector<C, T, E>
                        if buf[0] == b'[' {
                            String::from_utf8(buf.to_vec()).unwrap()
                        } else {
-                           HexViewBuilder::new(&buf[..]).finish().to_string()
+                           HexViewBuilder::new(&buf[..])
+                               .codepage(&CODEPAGE_HEX[..])
+                               .finish()
+                               .to_string()
                        });
             }
         }
