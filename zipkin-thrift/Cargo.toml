@@ -9,7 +9,6 @@ byteorder = "1.0"
 ordered-float = "0.4"
 try_from = "0.2"
 bytes = "0.4"
-tokio-io = "0.1"
 mime = "0.2"
 
 thrift = { path = "thrift/lib/rs" }

@@ -1,7 +1,5 @@
 use std::marker::PhantomData;
 
-use tokio_io::codec::Encoder;
-
 use bytes::{BytesMut, BufMut};
 
 use mime::Mime;
@@ -9,7 +7,7 @@ use mime::Mime;
 use errors::Error;
 use encode::{ToThrift, to_writer};
 
-use zipkin_core::MimeType;
+use zipkin_core::{Encoder, MimeType};
 
 pub struct ThriftCodec<T, E> {
     item: PhantomData<T>,

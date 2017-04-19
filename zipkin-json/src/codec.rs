@@ -1,14 +1,12 @@
 use std::marker::PhantomData;
 
-use tokio_io::codec::Encoder;
-
 use bytes::{BytesMut, BufMut};
 
 use mime::Mime;
 
 use encode::{ToJson, to_writer, to_writer_pretty};
 
-use zipkin_core::MimeType;
+use zipkin_core::{Encoder, MimeType};
 
 pub struct JsonCodec<T, E> {
     pub pretty_print: bool,

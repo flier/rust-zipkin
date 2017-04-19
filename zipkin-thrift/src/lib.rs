@@ -5,7 +5,6 @@ extern crate ordered_float;
 extern crate thrift;
 extern crate try_from;
 extern crate bytes;
-extern crate tokio_io;
 #[macro_use]
 extern crate mime;
 

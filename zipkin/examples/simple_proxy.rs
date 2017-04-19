@@ -74,17 +74,18 @@ error_chain!{
 }
 
 struct SimpleProxy<'a, S, C>
-    where S: 'static + zipkin::Sampler<Item = zipkin::Span<'a>>,
-          C: 'static + zipkin::Collector<Item = Vec<zipkin::Span<'a>>, Output = (), Error = zipkin::Error>
+    where S: 'static + zipkin::Sampler<'a>,
+          C: 'static + zipkin::Collector<'a>
 {
     addr: String,
     proto: String,
     tracer: Arc<zipkin::Tracer<S, C>>,
+    phantom: PhantomData<&'a S>,
 }
 
 impl<'a, S, C> Handler for SimpleProxy<'a, S, C>
-    where S: 'static + zipkin::Sampler<Item = zipkin::Span<'a>>,
-          C: 'static + zipkin::Collector<Item = Vec<zipkin::Span<'a>>, Output = (), Error = zipkin::Error>
+    where S: 'static + zipkin::Sampler<'a>,
+          C: 'static + zipkin::Collector<'a>
 {
     fn handle(&self, req: Request, mut res: Response) {
         debug!("request from {}: {} {} {}",
@@ -118,8 +119,8 @@ impl<'a, S, C> Handler for SimpleProxy<'a, S, C>
 }
 
 impl<'a, S, C> SimpleProxy<'a, S, C>
-    where S: 'static + zipkin::Sampler<Item = zipkin::Span<'a>>,
-          C: 'static + zipkin::Collector<Item = Vec<zipkin::Span<'a>>, Output = (), Error = zipkin::Error>
+    where S: 'static + zipkin::Sampler<'a>,
+          C: 'static + zipkin::Collector<'a>
 {
     fn serve_http_request(&self,
                           req: Request,
@@ -303,10 +304,8 @@ impl Pipe {
                      tracer: Arc<zipkin::Tracer<S, C>>,
                      parent_id: zipkin::SpanId)
                      -> Result<()>
-        where S: 'static + zipkin::Sampler<Item = zipkin::Span<'a>>,
-              C: 'static + zipkin::Collector<Item = Vec<zipkin::Span<'a>>,
-                                   Output = (),
-                                   Error = zipkin::Error>
+        where S: 'static + zipkin::Sampler<'a>,
+              C: 'static + zipkin::Collector<'a>
     {
         self.upstream.set_nodelay(true)?;
         self.client.set_nodelay(true)?;
@@ -340,10 +339,8 @@ impl Pipe {
                       parent_id: zipkin::SpanId,
                       to_upstream: bool)
                       -> Result<()>
-        where S: 'static + zipkin::Sampler<Item = zipkin::Span<'a>>,
-              C: 'static + zipkin::Collector<Item = Vec<zipkin::Span<'a>>,
-                                   Output = (),
-                                   Error = zipkin::Error>
+        where S: 'static + zipkin::Sampler<'a>,
+              C: 'static + zipkin::Collector<'a>
     {
         let mut buf = [0; 4096];
 
@@ -422,7 +419,7 @@ impl<'a> Default for DummyCollector<'a, Vec<zipkin::Span<'a>>> {
     }
 }
 
-impl<'a: 'b, 'b> zipkin::Collector for DummyCollector<'a, Vec<zipkin::Span<'a>>> {
+impl<'a> zipkin::core::Collector for DummyCollector<'a, Vec<zipkin::Span<'a>>> {
     type Item = Vec<zipkin::Span<'a>>;
     type Output = ();
     type Error = zipkin::Error;
@@ -582,6 +579,7 @@ fn main() {
             addr: addr,
             proto: "http".to_owned(),
             tracer: tracer,
+            phantom: PhantomData,
         };
 
         if let Some(threads) = threads {

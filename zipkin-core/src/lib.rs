@@ -19,6 +19,8 @@ mod sampler;
 mod tracer;
 mod collector;
 
+pub use tokio_io::codec::Encoder;
+
 pub use constants::*;
 pub use span::{TraceId, SpanId, Timestamp, timestamp, now, ToMicrosecond, Duration, Endpoint,
                Annotation, Value, BinaryAnnotation, BinaryAnnotationValue, Annotatable, Span};

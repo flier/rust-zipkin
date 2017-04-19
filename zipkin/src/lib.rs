@@ -5,6 +5,9 @@ extern crate error_chain;
 
 extern crate zipkin_core;
 
+pub mod errors;
+pub use errors::{Error, ErrorKind, Result};
+
 pub mod core {
     pub use zipkin_core::*;
     pub use zipkin_core::errors::*;
@@ -12,8 +15,24 @@ pub mod core {
 
 pub use core::constants::*;
 pub use core::{TraceId, SpanId, Timestamp, Endpoint, Annotation, Value, BinaryAnnotation,
-               Annotatable, Span, Sampler, FixedRate, RateLimit, Tracer, MimeType, Transport,
-               Collector, BaseCollector};
+               Annotatable, Span, FixedRate, RateLimit, Tracer, MimeType, Transport, BaseCollector};
+
+pub trait Encoder<'a>: core::Encoder<Item = Vec<Span<'a>>, Error = Error> {}
+
+impl<'a, T> Encoder<'a> for T where T: core::Encoder<Item = Vec<Span<'a>>, Error = Error> {}
+
+pub trait Sampler<'a>: core::Sampler<Item = Span<'a>> {}
+
+impl<'a, T> Sampler<'a> for T where T: core::Sampler<Item = core::Span<'a>> {}
+
+pub trait Collector<'a>
+    : core::Collector<Item = Vec<Span<'a>>, Output = (), Error = Error> {
+}
+
+impl<'a, T> Collector<'a> for T
+    where T: core::Collector<Item = Vec<Span<'a>>, Output = (), Error = Error>
+{
+}
 
 pub mod prelude {
     pub use core::{Annotatable, BinaryAnnotationValue, MimeType};
@@ -26,9 +45,6 @@ pub mod collector {
         zipkin_core::BaseCollector::new(encoder, transport)
     }
 }
-
-pub mod errors;
-pub use errors::{Error, ErrorKind, Result};
 
 // hack for #[macro_reexport] feature
 //

@@ -3,7 +3,6 @@ extern crate error_chain;
 extern crate serde_json;
 extern crate base64;
 extern crate bytes;
-extern crate tokio_io;
 #[macro_use]
 extern crate mime;
 
