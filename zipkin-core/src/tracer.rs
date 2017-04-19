@@ -3,20 +3,20 @@ use span::{Span, now};
 use collector::Collector;
 
 #[derive(Clone, Debug, Default)]
-pub struct Tracer<S, C> {
+pub struct Tracer<S, C: ?Sized> {
     pub sampler: Option<S>,
-    pub collector: C,
+    pub collector: Box<C>,
 }
 
-impl<'a, S, C> Tracer<S, C> {
-    pub fn new(collector: C) -> Self {
+impl<'a, S, C: ?Sized> Tracer<S, C> {
+    pub fn new(collector: Box<C>) -> Self {
         Tracer {
             sampler: None,
             collector: collector,
         }
     }
 
-    pub fn with_sampler(sampler: S, collector: C) -> Self {
+    pub fn with_sampler(sampler: S, collector: Box<C>) -> Self {
         Tracer {
             sampler: Some(sampler),
             collector: collector,
@@ -25,7 +25,8 @@ impl<'a, S, C> Tracer<S, C> {
 }
 
 impl<'a, S, C> Tracer<S, C>
-    where S: Sampler<Item = Span<'a>>
+    where S: Sampler<Item = Span<'a>>,
+          C: ?Sized
 {
     pub fn span(&self, name: &'a str) -> Span<'a> {
         let span = Span::new(name);
@@ -41,7 +42,7 @@ impl<'a, S, C> Tracer<S, C>
 }
 
 impl<'a, S, C> Tracer<S, C>
-    where C: Collector<Item = Vec<Span<'a>>>
+    where C: Collector<Item = Vec<Span<'a>>> + ?Sized
 {
     pub fn submit(&self,
                   mut span: Span<'a>)
@@ -83,13 +84,14 @@ mod tests {
 
     #[test]
     fn sampling() {
-        let mut tracer = Tracer::with_sampler(FixedRate::new(2), MockCollector::default());
+        let mut tracer = Tracer::with_sampler(FixedRate::new(2),
+                                              Box::new(MockCollector::default()));
 
         assert_eq!(tracer.span("test1").sampled, Some(true));
         assert_eq!(tracer.span("test2").sampled, Some(false));
         assert_eq!(tracer.span("test3").sampled, Some(true));
 
-        tracer = Tracer::new(MockCollector::default());
+        tracer = Tracer::new(Box::new(MockCollector::default()));
 
         assert_eq!(tracer.span("test1").sampled, None);
     }

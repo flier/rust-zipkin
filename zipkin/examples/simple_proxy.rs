@@ -73,19 +73,15 @@ error_chain!{
     }
 }
 
-struct SimpleProxy<'a, S, C>
-    where S: 'static + zipkin::Sampler<'a>,
-          C: 'static + zipkin::Collector<'a>
-{
+struct SimpleProxy<S, C: ?Sized> {
     addr: String,
     proto: String,
     tracer: Arc<zipkin::Tracer<S, C>>,
-    phantom: PhantomData<&'a S>,
 }
 
-impl<'a, S, C> Handler for SimpleProxy<'a, S, C>
+impl<'a, S, C> Handler for SimpleProxy<S, C>
     where S: 'static + zipkin::Sampler<'a>,
-          C: 'static + zipkin::Collector<'a>
+          C: 'static + zipkin::Collector<'a> + ?Sized
 {
     fn handle(&self, req: Request, mut res: Response) {
         debug!("request from {}: {} {} {}",
@@ -118,9 +114,9 @@ impl<'a, S, C> Handler for SimpleProxy<'a, S, C>
     }
 }
 
-impl<'a, S, C> SimpleProxy<'a, S, C>
+impl<'a, S, C> SimpleProxy<S, C>
     where S: 'static + zipkin::Sampler<'a>,
-          C: 'static + zipkin::Collector<'a>
+          C: 'static + zipkin::Collector<'a> + ?Sized
 {
     fn serve_http_request(&self,
                           req: Request,
@@ -305,7 +301,7 @@ impl Pipe {
                      parent_id: zipkin::SpanId)
                      -> Result<()>
         where S: 'static + zipkin::Sampler<'a>,
-              C: 'static + zipkin::Collector<'a>
+              C: 'static + zipkin::Collector<'a> + ?Sized
     {
         self.upstream.set_nodelay(true)?;
         self.client.set_nodelay(true)?;
@@ -339,8 +335,8 @@ impl Pipe {
                       parent_id: zipkin::SpanId,
                       to_upstream: bool)
                       -> Result<()>
-        where S: 'static + zipkin::Sampler<'a>,
-              C: 'static + zipkin::Collector<'a>
+        where S: zipkin::Sampler<'a>,
+              C: zipkin::Collector<'a> + ?Sized
     {
         let mut buf = [0; 4096];
 
@@ -497,102 +493,81 @@ fn parse_cmd_line() -> Result<Config> {
        })
 }
 
-macro_rules! trace {
-    ($format:expr, $url:ident, $callback:expr) => {
-        match $format {
-            "json" => {
-                info!("use JSON encoder");
-
-                trace_with_encoder!(zipkin::codec::json(), $url, $callback)
-            }
-            "pretty" |"pretty_json" => {
-                info!("use pretty JSON encoder");
-
-                trace_with_encoder!(zipkin::codec::pretty_json(), $url, $callback)
-            },
-            "thrift" => {
-                info!("use thrift encoder");
-
-                trace_with_encoder!(zipkin::codec::thrift(), $url, $callback)
-            },
-            _ => panic!("unknown message format: {}", $format)
-        }
-    };
-}
-
-macro_rules! trace_with_encoder {
-    ($encoder:expr, $url:ident, $callback:expr) => {
-        if let Some(url) = $url {
-            match url.scheme() {
-                "kafka" => {
-                    let addr = url.with_default_port(|_| Ok(9092))
-                                  .unwrap()
-                                  .to_socket_addrs()
-                                  .unwrap()
-                                  .next()
-                                  .unwrap()
-                                  .to_string();
-                    let topic = url.fragment().unwrap_or("zipkin");
-                    let config = zipkin::kafka::Config::new(&[addr], topic);
-                    let transport = zipkin::kafka::Transport::new(config).unwrap();
-                    let collector = zipkin::collector::new($encoder, transport);
-
-                    $callback(collector);
-                }
-                "http" => {
-                    let config = zipkin::http::Config::new($encoder.mime_type());
-                    let transport = zipkin::http::Transport::new(url.as_str(), config).unwrap();
-                    let collector = zipkin::collector::new($encoder, transport);
-
-                    $callback(collector);
-                }
-                _ => panic!("unknown collector type: {}", url.scheme())
-            }
-        } else {
-            let collector = DummyCollector::default();
-
-            $callback(collector);
-        }
-    }
-}
-
 fn main() {
     pretty_env_logger::init().unwrap();
 
     let cfg = parse_cmd_line().unwrap();
 
-    let format = cfg.format.as_str();
-    let uri = cfg.collector_uri.as_ref();
+    let codec: zipkin::BoxCodec = match cfg.format.as_str() {
+        "json" => {
+            info!("use JSON encoder");
+
+            Box::new(zipkin::codec::json())
+        }
+        "pretty" | "pretty_json" => {
+            info!("use pretty JSON encoder");
+
+            Box::new(zipkin::codec::pretty_json())
+        }
+        "thrift" => {
+            info!("use thrift encoder");
+
+            Box::new(zipkin::codec::thrift())
+        }
+        _ => panic!("unknown message format: {}", cfg.format),
+    };
+
+    let collector: zipkin::BoxCollector = if let Some(url) = cfg.collector_uri {
+        match url.scheme() {
+            "kafka" => {
+                let addr = url.with_default_port(|_| Ok(9092))
+                    .unwrap()
+                    .to_socket_addrs()
+                    .unwrap()
+                    .next()
+                    .unwrap()
+                    .to_string();
+                let topic = url.fragment().unwrap_or("zipkin");
+                let config = zipkin::kafka::Config::new(&[addr], topic);
+                let transport = zipkin::kafka::Transport::new(config).unwrap();
+
+                Box::new(zipkin::collector::new(codec, Box::new(transport)))
+            }
+            "http" => {
+                let config = zipkin::http::Config::new(codec.mime_type());
+                let transport = zipkin::http::Transport::new(url.as_str(), config).unwrap();
+
+                Box::new(zipkin::collector::new(codec, Box::new(transport)))
+            }
+            _ => panic!("unknown collector type: {}", url.scheme()),
+        }
+    } else {
+        Box::new(DummyCollector::default())
+    };
 
     let sampler = zipkin::FixedRate::new(cfg.sample_rate);
-    let addr = cfg.addr;
-    let threads = cfg.threads;
+    let tracer = Arc::new(zipkin::Tracer::with_sampler(sampler, collector));
 
-    trace!(format, uri, |collector| {
-        let tracer = Arc::new(zipkin::Tracer::with_sampler(sampler, collector));
+    let server = Server::http(&cfg.addr).unwrap();
 
-        let server = Server::http(&addr).unwrap();
+    info!("listening on {}",  cfg.addr);
 
-        info!("listening on {}", addr);
+    let proxy = SimpleProxy {
+        addr: cfg.addr,
+        proto: "http".to_owned(),
+        tracer: tracer,
+    };
 
-        let proxy = SimpleProxy {
-            addr: addr,
-            proto: "http".to_owned(),
-            tracer: tracer,
-            phantom: PhantomData,
-        };
-
-        if let Some(threads) = threads {
-            info!("starting {} v{} with {} threads to handle requests",
+    if let Some(threads) = cfg.threads {
+        info!("starting {} v{} with {} threads to handle requests",
                   APP_NAME,
                   APP_VERSION,
                   threads);
 
-            server.handle_threads(proxy, threads).unwrap();
-        } else {
-            info!("starting {} v{} to handle requests", APP_NAME, APP_VERSION);
+        server.handle_threads(proxy, threads).unwrap();
+    } else {
+        info!("starting {} v{} to handle requests", APP_NAME, APP_VERSION);
 
-            server.handle(proxy).unwrap();
-        }
-    });
+        server.handle(proxy).unwrap();
+    }
 }

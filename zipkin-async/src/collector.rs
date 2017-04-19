@@ -1,4 +1,5 @@
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
+use std::marker::PhantomData;
 
 use futures::future;
 use futures::{Future, BoxFuture};
@@ -6,84 +7,89 @@ use futures_cpupool::CpuPool;
 
 use bytes::BytesMut;
 
-use tokio_io::codec::Encoder;
+use zipkin_core::{Codec, Span, Transport, Collector};
 
-use zipkin_core::{Span, Transport, Collector};
+use errors::Error;
 
-use errors::{Error, Result};
-
-pub trait AsyncCollector {
+pub trait AsyncCollector: Send {
     type Item;
-    type Output: Send;
+    type Output;
     type Error;
-    type Result: Future<Item = Self::Output, Error = Self::Error>;
+    type Future: Future<Item = Self::Output, Error = Self::Error>;
 
-    fn async_submit(&self, item: Self::Item) -> Self::Result;
+    fn async_submit(&self, item: Self::Item) -> Self::Future;
+}
+
+#[inline(always)]
+fn lock<T, F, E>(m: &Mutex<T>, callback: F) -> Result<(), E>
+    where F: FnOnce(MutexGuard<T>) -> Result<(), E>,
+          E: From<Error>
+{
+    match m.lock() {
+        Ok(locked) => callback(locked),
+        Err(err) => Err(Error::from(err).into()),
+    }
 }
 
 #[derive(Clone)]
-pub struct BaseAsyncCollector<E, T> {
+pub struct BaseAsyncCollector<C, T, E> {
     pub max_message_size: usize,
-    pub encoder: Arc<Mutex<E>>,
+    pub encoder: Arc<Mutex<C>>,
     pub transport: Arc<Mutex<T>>,
     pub thread_pool: CpuPool,
+    phantom: PhantomData<E>,
 }
 
-impl<'a, E, T> BaseAsyncCollector<E, T>
-    where E: Encoder<Item = Span<'a>, Error = Error>
+impl<'a, C, T, E> BaseAsyncCollector<C, T, E>
+    where C: Codec<Item = Vec<Span<'a>>, Error = E>,
+          E: From<::std::io::Error> + From<Error> + Send + Sync
 {
-    fn encode(&self, span: Span<'a>, buf: &mut BytesMut) -> Result<()> {
-        self.encoder.lock()?.encode(span, buf)?;
+    pub fn encode(&self, spans: Vec<Span<'a>>, buf: &mut BytesMut) -> Result<(), E> {
+        lock(&self.encoder, |mut encoder| encoder.encode(spans, buf))
+    }
+}
+
+impl<'a, C, T, E> Collector for BaseAsyncCollector<C, T, E>
+    where C: Codec<Item = Vec<Span<'a>>, Error = E>,
+          T: Transport<Buffer = BytesMut, Output = (), Error = E>,
+          E: From<::std::io::Error> + From<Error> + Send + Sync
+{
+    type Item = Vec<Span<'a>>;
+    type Output = ();
+    type Error = E;
+
+    fn submit(&self, spans: Self::Item) -> Result<Self::Output, Self::Error> {
+        let mut buf = BytesMut::with_capacity(self.max_message_size);
+
+        self.encode(spans, &mut buf)?;
+
+        lock(&self.transport, |mut transport| transport.send(&buf))?;
 
         Ok(())
     }
 }
 
-impl<'a, E, T> Collector for BaseAsyncCollector<E, T>
-    where E: Encoder<Item = Span<'a>, Error = Error> + Sync + Send,
-          T: Transport<BytesMut, Error = Error>
+impl<'a, C, T, E> AsyncCollector for BaseAsyncCollector<C, T, E>
+    where C: 'static + Codec<Item = Vec<Span<'a>>, Error = E>,
+          T: 'static + Transport<Buffer = BytesMut, Output = (), Error = E>,
+          E: 'static + From<::std::io::Error> + From<Error> + Sync + Send
 {
-    type Item = Span<'a>;
+    type Item = Vec<Span<'a>>;
     type Output = ();
-    type Error = Error;
+    type Error = E;
+    type Future = BoxFuture<Self::Output, Self::Error>;
 
-    fn submit(&self, span: Span<'a>) -> Result<()> {
+    fn async_submit(&self, spans: Self::Item) -> Self::Future {
         let mut buf = BytesMut::with_capacity(self.max_message_size);
 
-        self.encode(span, &mut buf)?;
-
-        {
-            self.transport.lock()?.send(&buf)?;
-        }
-
-        Ok(())
-    }
-}
-
-impl<'a, E, T> AsyncCollector for BaseAsyncCollector<E, T>
-    where E: Encoder<Item = Span<'a>, Error = Error>,
-          T: Transport<BytesMut, Error = Error>
-{
-    type Item = Span<'a>;
-    type Output = ();
-    type Error = Error;
-    type Result = BoxFuture<Self::Output, Self::Error>;
-
-    fn async_submit(&self, span: Span<'a>) -> Self::Result {
-        let mut buf = BytesMut::with_capacity(self.max_message_size);
-
-        if let Err(err) = self.encode(span, &mut buf) {
+        if let Err(err) = self.encode(spans, &mut buf) {
             return future::err(err).boxed();
         }
 
         let transport = self.transport.clone();
 
         self.thread_pool
-            .spawn_fn(move || {
-                          transport.lock()?.send(&buf)?;
-
-                          Ok(())
-                      })
+            .spawn_fn(move || lock(&transport, |mut transport| transport.send(&buf)))
             .boxed()
     }
 }
@@ -98,11 +104,9 @@ mod tests {
     use futures::Future;
     use futures_cpupool::CpuPool;
 
-    use tokio_io::codec::Encoder;
+    use zipkin_core::{Encoder, Span, Transport};
 
-    use zipkin_core::*;
-
-    use super::super::*;
+    use super::{AsyncCollector, BaseAsyncCollector};
     use super::super::errors::Error;
 
     #[derive(Clone)]
@@ -120,13 +124,14 @@ mod tests {
         }
     }
 
-    impl<B: AsRef<[u8]>> Transport<B> for MockTransport {
+    impl Transport for MockTransport {
+        type Buffer = BytesMut;
         type Output = ();
         type Error = Error;
 
-        fn send(&mut self, buf: &B) -> ::std::result::Result<Self::Output, Self::Error> {
+        fn send(&mut self, buf: &BytesMut) -> ::std::result::Result<Self::Output, Self::Error> {
             self.sent += 1;
-            self.buf.append(&mut buf.as_ref().to_vec());
+            self.buf.extend_from_slice(&buf[..]);
 
             Ok(())
         }
@@ -148,13 +153,10 @@ mod tests {
     }
 
     impl<'a> Encoder for MockEncoder<'a, Span<'a>> {
-        type Item = Span<'a>;
+        type Item = Vec<Span<'a>>;
         type Error = Error;
 
-        fn encode(&mut self,
-                  _: Self::Item,
-                  buf: &mut BytesMut)
-                  -> std::result::Result<(), Self::Error> {
+        fn encode(&mut self, _: Self::Item, buf: &mut BytesMut) -> Result<(), Self::Error> {
             self.encoded += 1;
 
             buf.put("hello");
@@ -173,9 +175,10 @@ mod tests {
             encoder: Arc::new(Mutex::new(MockEncoder::new())),
             transport: Arc::new(Mutex::new(MockTransport::new())),
             thread_pool: CpuPool::new(1),
+            phantom: PhantomData,
         };
 
-        collector.async_submit(span).wait().unwrap();
+        collector.async_submit(vec![span]).wait().unwrap();
 
         assert_eq!(collector.encoder.lock().unwrap().encoded, 1);
         assert_eq!(collector.transport.lock().unwrap().sent, 1);

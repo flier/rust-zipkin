@@ -9,17 +9,13 @@ use encode::{ToThrift, to_writer};
 
 use zipkin_core::{Encoder, MimeType};
 
-pub struct ThriftCodec<T, E> {
-    item: PhantomData<T>,
-    error: PhantomData<E>,
-}
+pub struct ThriftCodec<T, E>(PhantomData<(T, E)>);
+
+unsafe impl<T, E> Send for ThriftCodec<T, E> {}
 
 impl<T, E> ThriftCodec<T, E> {
     pub fn new() -> Self {
-        ThriftCodec {
-            item: PhantomData,
-            error: PhantomData,
-        }
+        ThriftCodec(PhantomData)
     }
 }
 

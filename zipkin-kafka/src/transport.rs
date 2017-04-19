@@ -41,13 +41,13 @@ impl KafkaConfig {
     }
 }
 
-pub struct KafkaTransport<E> {
+pub struct KafkaTransport<B, E> {
     producer: Producer,
     topic: String,
-    phantom: PhantomData<E>,
+    phantom: PhantomData<(B, E)>,
 }
 
-impl<E> KafkaTransport<E> {
+impl<B, E> KafkaTransport<B, E> {
     pub fn new(config: KafkaConfig) -> Result<Self> {
         let producer = Producer::from_hosts(config.hosts)
             .with_compression(config.compression)
@@ -64,13 +64,15 @@ impl<E> KafkaTransport<E> {
     }
 }
 
-impl<B: AsRef<[u8]>, E> Transport<B> for KafkaTransport<E>
-    where E: 'static + From<::kafka::Error> + Send
+impl<B, E> Transport for KafkaTransport<B, E>
+    where B: AsRef<[u8]> + Send + Sync,
+          E: From<::kafka::Error> + Send + Sync
 {
+    type Buffer = B;
     type Output = ();
     type Error = E;
 
-    fn send(&mut self, buf: &B) -> ::std::result::Result<(), Self::Error> {
+    fn send(&mut self, buf: &Self::Buffer) -> ::std::result::Result<Self::Output, Self::Error> {
         let record = Record::from_key_value(&self.topic, (), buf.as_ref());
 
         self.producer.send(&record)?;

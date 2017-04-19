@@ -40,13 +40,13 @@ impl HttpConfig {
     }
 }
 
-pub struct HttpTransport<E> {
+pub struct HttpTransport<B, E> {
     base: hyper::Url,
     config: HttpConfig,
-    phantom: PhantomData<E>,
+    phantom: PhantomData<(B, E)>,
 }
 
-impl<E> HttpTransport<E> {
+impl<B, E> HttpTransport<B, E> {
     pub fn new(base: &str, config: HttpConfig) -> Result<Self> {
         Ok(HttpTransport {
                base: hyper::Url::parse(base)?,
@@ -56,13 +56,15 @@ impl<E> HttpTransport<E> {
     }
 }
 
-impl<B: AsRef<[u8]>, E> Transport<B> for HttpTransport<E>
-    where E: 'static + From<::hyper::Error> + From<Error> + Send
+impl<B, E> Transport for HttpTransport<B, E>
+    where B: 'static + AsRef<[u8]> + Sync + Send,
+          E: 'static + From<::hyper::Error> + From<Error> + Sync + Send
 {
+    type Buffer = B;
     type Output = ();
     type Error = E;
 
-    fn send(&mut self, buf: &B) -> ::std::result::Result<(), Self::Error> {
+    fn send(&mut self, buf: &Self::Buffer) -> ::std::result::Result<Self::Output, Self::Error> {
         let mut client =
             self.config
                 .max_idle_connections

@@ -19,6 +19,7 @@ mod sampler;
 mod tracer;
 mod collector;
 
+pub use bytes::{BufMut, BytesMut};
 pub use tokio_io::codec::Encoder;
 
 pub use constants::*;
@@ -26,4 +27,4 @@ pub use span::{TraceId, SpanId, Timestamp, timestamp, now, ToMicrosecond, Durati
                Annotation, Value, BinaryAnnotation, BinaryAnnotationValue, Annotatable, Span};
 pub use sampler::{Sampler, FixedRate, RateLimit};
 pub use tracer::Tracer;
-pub use collector::{MimeType, Transport, Collector, BaseCollector};
+pub use collector::{MimeType, Codec, Transport, Collector, BaseCollector};

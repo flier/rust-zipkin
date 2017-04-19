@@ -8,6 +8,7 @@ use bytes::BytesMut;
 use hexplay::HexViewBuilder;
 
 use tokio_io::codec::Encoder;
+
 use mime::Mime;
 
 use span::Span;
@@ -26,32 +27,35 @@ pub trait MimeType {
     fn mime_type(&self) -> Mime;
 }
 
-pub trait Transport<B: AsRef<[u8]>>
-    where Self: 'static + Send
-{
-    type Output: Send;
+pub trait Codec: Encoder + Send {}
+
+impl<T> Codec for T where T: Encoder + Send {}
+
+pub trait Transport: Send + Sync {
+    type Buffer: AsRef<[u8]>;
+    type Output;
     type Error;
 
-    fn send(&mut self, buf: &B) -> Result<Self::Output, Self::Error>;
+    fn send(&mut self, buf: &Self::Buffer) -> Result<Self::Output, Self::Error>;
 }
 
-pub trait Collector: Sync + Send {
+pub trait Collector: Send + Sync {
     type Item;
-    type Output: Send;
+    type Output;
     type Error;
 
     fn submit(&self, item: Self::Item) -> Result<Self::Output, Self::Error>;
 }
 
-pub struct BaseCollector<C, T, E> {
+pub struct BaseCollector<'a, C: ?Sized, T: ?Sized, E: 'a> {
     pub max_message_size: usize,
-    pub encoder: Mutex<C>,
-    pub transport: Mutex<T>,
-    phantom: PhantomData<E>,
+    pub encoder: Mutex<Box<C>>,
+    pub transport: Mutex<Box<T>>,
+    phantom: PhantomData<&'a E>,
 }
 
-impl<C, T, E> BaseCollector<C, T, E> {
-    pub fn new(encoder: C, transport: T) -> Self {
+impl<'a, C: ?Sized, T: ?Sized, E> BaseCollector<'a, C, T, E> {
+    pub fn new(encoder: Box<C>, transport: Box<T>) -> Self {
         BaseCollector {
             max_message_size: 4096,
             encoder: Mutex::new(encoder),
@@ -61,10 +65,10 @@ impl<C, T, E> BaseCollector<C, T, E> {
     }
 }
 
-impl<'a: 'b, 'b, C, T, E> Collector for BaseCollector<C, T, E>
-    where C: Encoder<Item = Vec<Span<'a>>, Error = E> + Sync + Send,
-          T: Transport<BytesMut, Error = E>,
-          E: From<::std::io::Error> + Sync + Send
+impl<'a, C, T, E> Collector for BaseCollector<'a, C, T, E>
+    where C: Codec<Item = Vec<Span<'a>>, Error = E> + ?Sized + Send,
+          T: Transport<Buffer = BytesMut, Output = (), Error = E> + ?Sized,
+          E: From<::std::io::Error> + Send + Sync
 {
     type Item = Vec<Span<'a>>;
     type Output = ();
@@ -108,10 +112,7 @@ mod tests {
 
     use bytes::{BytesMut, BufMut};
 
-    use tokio_io::codec::Encoder;
-
-    use super::Collector;
-    use super::super::*;
+    use super::{Encoder, Transport, Collector, BaseCollector, Span};
     use super::super::errors::Error;
 
     struct MockTransport {
@@ -128,13 +129,14 @@ mod tests {
         }
     }
 
-    impl<B: AsRef<[u8]>> Transport<B> for MockTransport {
+    impl Transport for MockTransport {
+        type Buffer = BytesMut;
         type Output = ();
         type Error = Error;
 
-        fn send(&mut self, buf: &B) -> Result<Self::Output, Self::Error> {
+        fn send(&mut self, buf: &BytesMut) -> Result<Self::Output, Self::Error> {
             self.sent += 1;
-            self.buf.append(&mut buf.as_ref().to_vec());
+            self.buf.extend_from_slice(&buf[..]);
 
             Ok(())
         }
@@ -174,8 +176,8 @@ mod tests {
 
         let collector = BaseCollector {
             max_message_size: 1024,
-            encoder: Mutex::new(MockEncoder::new()),
-            transport: Mutex::new(MockTransport::new()),
+            encoder: Mutex::new(Box::new(MockEncoder::new())),
+            transport: Mutex::new(Box::new(MockTransport::new())),
             phantom: PhantomData,
         };
 

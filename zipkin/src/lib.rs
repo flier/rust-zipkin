@@ -15,15 +15,30 @@ pub mod core {
 
 pub use core::constants::*;
 pub use core::{TraceId, SpanId, Timestamp, Endpoint, Annotation, Value, BinaryAnnotation,
-               Annotatable, Span, FixedRate, RateLimit, Tracer, MimeType, Transport, BaseCollector};
+               Annotatable, Span, FixedRate, RateLimit, Tracer, MimeType};
 
-pub trait Encoder<'a>: core::Encoder<Item = Vec<Span<'a>>, Error = Error> {}
+pub trait Codec<'a>: core::Codec<Item = Vec<Span<'a>>, Error = Error> + MimeType {}
 
-impl<'a, T> Encoder<'a> for T where T: core::Encoder<Item = Vec<Span<'a>>, Error = Error> {}
+impl<'a, T> Codec<'a> for T where T: core::Codec<Item = Vec<Span<'a>>, Error = Error> + MimeType {}
+
+pub type BoxCodec<'a> = Box<Codec<'a, Item = Vec<Span<'a>>, Error = Error>>;
 
 pub trait Sampler<'a>: core::Sampler<Item = Span<'a>> {}
 
 impl<'a, T> Sampler<'a> for T where T: core::Sampler<Item = core::Span<'a>> {}
+
+pub trait Transport<B>: core::Transport<Buffer = B, Output = (), Error = Error>
+    where B: AsRef<[u8]> + Send
+{
+}
+
+impl<B, T> Transport<B> for T
+    where B: AsRef<[u8]> + Send,
+          T: core::Transport<Buffer = B, Output = (), Error = Error>
+{
+}
+
+pub type BoxTransport<B> = Box<core::Transport<Buffer = B, Output = (), Error = Error>>;
 
 pub trait Collector<'a>
     : core::Collector<Item = Vec<Span<'a>>, Output = (), Error = Error> {
@@ -34,15 +49,23 @@ impl<'a, T> Collector<'a> for T
 {
 }
 
+pub type BoxCollector<'a> = Box<Collector<'a, Item = Vec<Span<'a>>, Output = (), Error = Error>>;
+
+pub type BaseCollector<'a, C, T> = core::BaseCollector<'a, C, T, Error>;
+
 pub mod prelude {
     pub use core::{Annotatable, BinaryAnnotationValue, MimeType};
 }
 
 pub mod collector {
-    use zipkin_core;
+    use super::{Codec, Transport, BaseCollector};
+    use super::core::BytesMut;
 
-    pub fn new<C, T, E>(encoder: C, transport: T) -> zipkin_core::BaseCollector<C, T, E> {
-        zipkin_core::BaseCollector::new(encoder, transport)
+    pub fn new<'a, C, T>(codec: Box<C>, transport: Box<T>) -> BaseCollector<'a, C, T>
+        where C: Codec<'a> + ?Sized,
+              T: Transport<BytesMut> + ?Sized
+    {
+        BaseCollector::new(codec, transport)
     }
 }
 

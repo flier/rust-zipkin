@@ -10,24 +10,23 @@ use zipkin_core::{Encoder, MimeType};
 
 pub struct JsonCodec<T, E> {
     pub pretty_print: bool,
-    item: PhantomData<T>,
-    error: PhantomData<E>,
+    phantom: PhantomData<(T, E)>,
 }
+
+unsafe impl<T, E> Send for JsonCodec<T, E> {}
 
 impl<T, E> JsonCodec<T, E> {
     pub fn new() -> Self {
         JsonCodec {
             pretty_print: false,
-            item: PhantomData,
-            error: PhantomData,
+            phantom: PhantomData,
         }
     }
 
     pub fn pretty() -> Self {
         JsonCodec {
             pretty_print: true,
-            item: PhantomData,
-            error: PhantomData,
+            phantom: PhantomData,
         }
     }
 }
